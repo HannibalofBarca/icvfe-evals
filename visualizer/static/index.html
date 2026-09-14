@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ICVFE Evals Visualizer</title>
+<link rel="stylesheet" href="style.css" />
+<script>
+  (function () {
+    var saved = localStorage.getItem("theme");
+    if (saved === "light") document.documentElement.setAttribute("data-theme", "light");
+  })();
+</script>
+</head>
+<body>
+
+<header id="topbar">
+  <div class="tb-group">
+    <label class="tb-label">Task</label>
+    <select id="taskSelect"><option value="">Loading tasks…</option></select>
+  </div>
+
+  <div class="tb-group">
+    <label class="tb-label">Episode</label>
+    <input id="searchBox" type="number" min="1" placeholder="#" />
+    <span id="posLabel" class="tb-static">– / –</span>
+    <button id="prevBtn" class="icon-btn" title="Previous episode">◀</button>
+    <button id="nextBtn" class="icon-btn" title="Next episode">▶</button>
+  </div>
+
+  <div class="tb-group">
+    <span id="datasetOutcomeTag" class="dataset-outcome-tag" title="Dataset outcome label">–</span>
+    <span id="episodeUidTag" class="episode-uid-tag"></span>
+  </div>
+
+  <div class="tb-group tb-right">
+    <button id="themeToggleBtn" class="icon-btn" title="Toggle light/dark mode">🌙</button>
+  </div>
+</header>
+
+<main id="mainArea">
+  <section id="legendRow"></section>
+
+  <section id="chartSection">
+    <svg id="valueChart" viewBox="0 0 1000 400" preserveAspectRatio="none"></svg>
+  </section>
+
+  <div id="scrubber">
+    <div id="scrubFill"></div>
+    <div id="scrubPlayhead"></div>
+  </div>
+
+  <div id="timeReadout">
+    <span id="timeText">0:00.0</span>
+    <span id="frameText">frame 0 / 0</span>
+  </div>
+
+  <div id="transportControls">
+    <button id="gotoStartBtn" class="icon-btn" title="Go to start">|◀</button>
+    <button id="stepBack10" class="icon-btn" title="Back 10 frames">«10</button>
+    <button id="stepBackFrame" class="icon-btn" title="Previous frame">⏮</button>
+    <button id="playBtn" class="icon-btn play-btn" title="Play / Pause">▶</button>
+    <button id="stepFwdFrame" class="icon-btn" title="Next frame">⏭</button>
+    <button id="stepFwd10" class="icon-btn" title="Forward 10 frames">10»</button>
+    <button id="gotoEndBtn" class="icon-btn" title="Go to end">▶|</button>
+
+    <span class="ctrl-sep"></span>
+
+    <span class="tb-label">Speed</span>
+    <div id="speedButtons"></div>
+
+    <span class="ctrl-sep"></span>
+    <span class="hint-text">No video in this export &mdash; the chart above is a synthetic playhead over the four evaluators' progress curves.</span>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

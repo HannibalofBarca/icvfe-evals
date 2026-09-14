@@ -1,0 +1,5 @@
+data/
+analysis/cache/
+analysis/output/
+**/__pycache__/
+*.pyc
