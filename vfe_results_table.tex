@@ -1,0 +1,58 @@
+\begin{table*}[t]
+    \centering
+    \caption{\textbf{Value-function correlation against human progress annotations},
+    on the \NumEvalTasks{} evaluation tasks.}
+    \label{tab:vfe-retrieval-results}
+    \footnotesize
+    \begin{tabular}{lrrrrrr}
+        \toprule
+        & \multicolumn{3}{c}{Seen tasks} & \multicolumn{3}{c}{Unseen tasks} \\
+        \cmidrule(lr){2-4} \cmidrule(lr){5-7}
+        Method & Kendall $\tau_b$ & Pearson $r$ & MAE & Kendall $\tau_b$ & Pearson $r$ & MAE \\
+        \midrule
+        \multicolumn{7}{l}{\textit{Offline Reward Models}} \\
+        \cmidrule(lr){1-7}
+        RoboDopamine (zero-shot)       & \textbf{0.66} & \textbf{0.83} & \textbf{0.15} & \textbf{0.69} & \textbf{0.86} & \textbf{0.14} \\
+        RoboDopamine (fine-tuned)      & 0.61 & 0.73 & 0.14 & 0.74 & 0.87 & 0.10 \\
+        RoboMeter (zero-shot)          & 0.46 & 0.60 & 0.23 & 0.53 & 0.69 & 0.19 \\
+        RoboMeter (fine-tuned)         & 0.52 & 0.69 & 0.19 & 0.59 & 0.75 & 0.18 \\
+        TOPReward                      & 0.52 & 0.60 & 0.44 & 0.57 & 0.71 & 0.36 \\
+        GVL                            & 0.20 & 0.25 & 0.30 & 0.24 & 0.30 & 0.30 \\
+        \multicolumn{7}{l}{\textit{Online Reward Models}} \\
+        \cmidrule(lr){1-7}
+        IC-VFE         & \textbf{0.53} & \textbf{0.65} & \textbf{0.23} & \textbf{0.54} & \textbf{0.68} & \textbf{0.22} \\
+        RECAP             & 0.48 & 0.61 & 0.26 & 0.44 & 0.58 & 0.25 \\
+        RoboMeter (fine-tuned) & 0.15 & 0.30 & 0.25 & 0.23 & 0.37 & 0.25 \\
+        RoboMeter (zero-shot) & 0.13 & 0.23 & 0.27 & 0.23 & 0.35 & 0.27 \\
+        \bottomrule
+    \end{tabular}
+\end{table*}
+
+% ---------------------------------------------------------------------------
+
+\begin{table*}[t]
+    \centering
+    \caption{\textbf{Retrieval quality by mixing strategy}, on the \NumEvalTasks{} evaluation tasks.}
+    \label{tab:retrieval-quality}
+    \footnotesize
+    \begin{tabular}{lrrr}
+        \toprule
+        Method & TTC error & BC error & videoDTW error \\
+        \midrule
+        \multicolumn{4}{l}{\textit{Embedding distance}} \\
+        \cmidrule(lr){1-4}
+        DINO distance & \textbf{0.227} & \textbf{0.675} & \textbf{9.534} \\
+        VEP distance  & 0.323 & 0.683 & 12.346 \\
+        \multicolumn{4}{l}{\textit{Value}} \\
+        \cmidrule(lr){1-4}
+        RoboMeter (fine-tuned, online)         & 0.294 & 0.723 & 12.534 \\
+        RECAP                                  & 0.231 & 0.717 & 12.439 \\
+        IC-VFE                                 & \textbf{0.221} & \textbf{0.698} & \textbf{12.279} \\
+        \multicolumn{4}{l}{\textit{Vision + Value}} \\
+        \cmidrule(lr){1-4}
+        RoboMeter (fine-tuned, online)         & 0.225 & 0.675 & \textbf{9.533} \\
+        RECAP                                  & 0.222 & 0.672 & 9.539 \\
+        IC-VFE                                 & \textbf{0.221} & \textbf{0.672} & 9.540 \\
+        \bottomrule
+    \end{tabular}
+\end{table*}

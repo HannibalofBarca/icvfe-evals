@@ -72,6 +72,10 @@ CACHE_DIR = os.path.join(HERE, "cache", "b_metrics")
 DINO_ARCHIVE = os.path.normpath(
     os.path.join(HERE, "..", "..", "Reward Based Retrieval", "dino_embeddings_demo.zip")
 )
+VEP_ARCHIVE = os.path.normpath(
+    os.path.join(HERE, "..", "data", "demo_set_annotations", "demo_set_annotations",
+                 "vep", "vep_icl_demo_dataset_embeddings.zip")
+)
 ACTION_DATA_ROOT = os.path.normpath(
     os.path.join(HERE, "..", "..", "obs_fix", "output", "icl-demo-dataset-fixed-action")
 )
@@ -96,8 +100,35 @@ def _extract_dino_archive() -> str:
     return os.path.join(dest, entries[0]) if len(entries) == 1 else dest
 
 
-class DinoIndex:
-    """episode_uid -> sorted (frames, embeddings) for nearest-frame lookup."""
+class EmbeddingIndex:
+    """episode_uid -> sorted (frames, embeddings) for nearest-frame lookup.
+
+    Base class shared by DinoIndex and VepIndex -- both are sparse
+    (every-10th-frame + tail), per-episode embedding sets, differing only in
+    where/how they're loaded from disk. Subclasses populate self._frames /
+    self._embeddings in __init__.
+    """
+
+    def interp(self, episode_uid: str, frame: int) -> np.ndarray:
+        """Per-dimension linear interpolation between the two bracketing sampled frames (clamped at episode ends)."""
+        frames = self._frames[episode_uid]
+        emb = self._embeddings[episode_uid]
+        if frame <= frames[0]:
+            return emb[0]
+        if frame >= frames[-1]:
+            return emb[-1]
+        j = int(np.searchsorted(frames, frame, side="right")) - 1
+        t = (frame - frames[j]) / (frames[j + 1] - frames[j])
+        return emb[j] + t * (emb[j + 1] - emb[j])
+
+    def sequence(self, episode_uid: str, start_frame: int, horizon: int = CHUNK_HORIZON) -> np.ndarray:
+        length = _episode_length(episode_uid)
+        end_frame = min(start_frame + horizon, length)
+        return np.stack([self.interp(episode_uid, f) for f in range(start_frame, end_frame)])
+
+
+class DinoIndex(EmbeddingIndex):
+    """DINO ViT embeddings, one .npz per TASK (multiple episodes concatenated inside)."""
 
     def __init__(self):
         root = _extract_dino_archive()
@@ -120,22 +151,33 @@ class DinoIndex:
             self._frames[uid] = frames[order]
             self._embeddings[uid] = emb[order]
 
-    def interp(self, episode_uid: str, frame: int) -> np.ndarray:
-        """Per-dimension linear interpolation between the two bracketing sampled frames (clamped at episode ends)."""
-        frames = self._frames[episode_uid]
-        emb = self._embeddings[episode_uid]
-        if frame <= frames[0]:
-            return emb[0]
-        if frame >= frames[-1]:
-            return emb[-1]
-        j = int(np.searchsorted(frames, frame, side="right")) - 1
-        t = (frame - frames[j]) / (frames[j + 1] - frames[j])
-        return emb[j] + t * (emb[j + 1] - emb[j])
 
-    def sequence(self, episode_uid: str, start_frame: int, horizon: int = CHUNK_HORIZON) -> np.ndarray:
-        length = _episode_length(episode_uid)
-        end_frame = min(start_frame + horizon, length)
-        return np.stack([self.interp(episode_uid, f) for f in range(start_frame, end_frame)])
+def _extract_vep_archive() -> str:
+    dest = os.path.join(CACHE_DIR, "vep_icl_demo_dataset_embeddings")
+    if not (os.path.isdir(dest) and os.listdir(dest)):
+        os.makedirs(dest, exist_ok=True)
+        with zipfile.ZipFile(VEP_ARCHIVE) as zf:
+            zf.extractall(dest)
+    entries = [e for e in os.listdir(dest) if os.path.isdir(os.path.join(dest, e))]
+    return os.path.join(dest, entries[0]) if len(entries) == 1 else dest
+
+
+class VepIndex(EmbeddingIndex):
+    """VEP embeddings (128-dim), one .npz per EPISODE (frame_index every-10th + tail, like DINO)."""
+
+    def __init__(self):
+        root = _extract_vep_archive()
+        self._frames: dict[str, np.ndarray] = {}
+        self._embeddings: dict[str, np.ndarray] = {}
+        for fname in os.listdir(root):
+            if not fname.endswith(".npz"):
+                continue
+            with np.load(os.path.join(root, fname), allow_pickle=True) as d:
+                uid = str(d["episode_uid"])
+                frames, emb = d["frame_index"], d["embeddings"]
+                order = np.argsort(frames)
+                self._frames[uid] = frames[order]
+                self._embeddings[uid] = emb[order]
 
 
 # --------------------------------------------------------------------------
@@ -229,10 +271,11 @@ def ttc_error(query_uid: str, query_frame: int, retrieved_uid: str, retrieved_fr
     return abs(ttc_retrieved - ttc_query)
 
 
-def video_dtw_error(dino: DinoIndex, query_uid: str, query_frame: int,
+def video_dtw_error(embeddings: EmbeddingIndex, query_uid: str, query_frame: int,
                      retrieved_uid: str, retrieved_frame: int, horizon: int = CHUNK_HORIZON) -> float:
-    current_chunk = dino.sequence(query_uid, query_frame, horizon)
-    retrieved_chunk = dino.sequence(retrieved_uid, retrieved_frame, horizon)
+    """DTW error over an embedding sequence -- pass a DinoIndex or VepIndex."""
+    current_chunk = embeddings.sequence(query_uid, query_frame, horizon)
+    retrieved_chunk = embeddings.sequence(retrieved_uid, retrieved_frame, horizon)
     return dtw_path_normalized(retrieved_chunk, current_chunk)
 
 
@@ -243,10 +286,11 @@ def bc_error(query_uid: str, query_frame: int, retrieved_uid: str, retrieved_fra
     return dtw_path_normalized(retrieved, needed)
 
 
-def naive_dino_error(dino: DinoIndex, query_uid: str, query_frame: int,
+def naive_dino_error(embeddings: EmbeddingIndex, query_uid: str, query_frame: int,
                       retrieved_uid: str, retrieved_frame: int) -> float:
-    query_emb = dino.interp(query_uid, query_frame)
-    retrieved_emb = dino.interp(retrieved_uid, retrieved_frame)
+    """Single-frame embedding distance -- pass a DinoIndex or VepIndex (naming kept for backward compat)."""
+    query_emb = embeddings.interp(query_uid, query_frame)
+    retrieved_emb = embeddings.interp(retrieved_uid, retrieved_frame)
     return float(np.linalg.norm(query_emb - retrieved_emb))
 
 
