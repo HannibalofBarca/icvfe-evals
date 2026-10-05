@@ -66,7 +66,7 @@ elapsed time (e.g. TOPReward). Seen-task Kendall τ-b / Pearson r:
 | GVL | 0.20 / 0.25 | 0.35 / 0.43 |
 | RoboMeter FT (online) | 0.15 / 0.30 | 0.32 / 0.45 |
 | RECAP | 0.37 / 0.50 | 0.48 / 0.61 |
-| IC-VFE (EMA 0.5) | 0.36 / 0.50 | 0.53 / 0.65 |
+| IC-VFE | 0.36 / 0.50 | 0.53 / 0.65 |
 
 Compare models only within one aggregation scheme.
 
@@ -78,19 +78,16 @@ Compare models only within one aggregation scheme.
 | `a2_pipeline.py` | **A2:** fine-tuned vs. zero-shot (RoboMeter, Robo-Dopamine) | `A2-finetuned vs zeroshot/` |
 | `a3_pipeline.py` | **A3:** online models (RoboMeter ZS/FT online, RECAP, IC-VFE) vs. human | `A3-online ft models vs human/` |
 | `seen_unseen_split.py` | A1–A3 metrics split into seen (15) / unseen (12) tasks, using RECAP's fine-tuning split | `seen-unseen split/` |
-| `b1_full_run.py` | **B1:** retrieval from a per-task demo-bank episode by value, DINO distance, or value + DINO; sharded via `b1_full_run_{tasklist,shard,merge}.py` | `b1_full_run/` |
-| `b2_lambda_sweep.py` | **B2:** sweep of λ in `λ·value_dist + (1−λ)·vision_dist`, λ ∈ {0, 0.25, 0.5, 0.75, 1} | `B2-*` |
+| `b1_full_run.py` | **B1:** for each frame of an episode, retrieve the matching point in a reference demo of the same task, using value estimates, DINO visual similarity, or both, and measure how well the retrieved point matches | `b1_full_run/` |
 
-B1/B2 retrieval metrics (`b_metrics.py`):
+B1 retrieval metrics (`b_metrics.py`):
 - **TTC error:** difference in normalized time-to-completion between the query and the retrieved frame.
-- **videoDTW error:** DTW distance between the 30-frame DINO chunks.
-- **BC error:** L1 distance between the 30-step action chunks.
 - **DINO error:** single-frame embedding distance.
 
 ```bash
 cd analysis
 python a1_pipeline.py && python a2_pipeline.py && python a3_pipeline.py && python seen_unseen_split.py
-python b1_full_run.py && python b2_lambda_sweep.py
+python b1_full_run.py
 ```
 
 Requires `numpy`, `pandas`, `scipy`, `matplotlib`. Archives are extracted into
@@ -102,6 +99,9 @@ after replacing an archive.
 - `analysis/pipeline.py`, `plotting.py`, `build_report.py`, `baseline_reports.py`,
   `progress_curves.py`: earlier pairwise study (Robo-Dopamine / RoboMeter / IC-VFE /
   RECAP vs. human and vs. Robo-Dopamine) with figures and per-episode curve plots.
-- `rescore_vfe_paper_ablation.py`, `rescore_vfe_ema.py`: CPU rescoring of saved IC-VFE
-  ablation predictions and causal-EMA smoothing.
+- `rescore_vfe_paper_ablation.py`: CPU rescoring of saved IC-VFE ablation predictions.
+- `b2_lambda_sweep.py`: B2, a sweep of the value/vision mixing weight λ in B1 retrieval
+  (`λ·value_dist + (1−λ)·vision_dist`).
+- `b_metrics.py` also computes **videoDTW error** (DTW distance between 30-frame DINO
+  chunks) and **BC error** (L1 distance between the retrieved and query action chunks).
 - `visualizer/`: local web app to overlay one episode's curves (`python visualizer/server.py`).
