@@ -7,7 +7,8 @@ ZS reference" in the doc, but scored against manual here instead), restricted
 to the online-eligible variant of each model (per B1's "online-eligible
 retrieval keys" framing -- these don't need full-episode/goal-frame context,
 unlike RoboDopamine ZS/FT, so they're usable online):
-  variants: RoboMeter FT (online), recap (FT-only), ICVFE (FT-only)
+  variants: RoboMeter ZS (online), RoboMeter FT (online), recap (FT-only),
+  ICVFE (FT-only)
   scored against: manual (human) annotations
   metrics: Pearson r, Kendall tau-b, MAE -- at episode / task / total granularity
   notes: A2 will likely show FT > ZS in aggregate, but FT is known to
@@ -33,7 +34,7 @@ per user direction:
   - icvfe_ema_0.5 -- same base checkpoint, EMA-smoothed predictions (alpha=0.5)
 
 Evaluator formats in this roster are NOT uniform:
-  - robometer_ft_online: plain per-frame JSON (points/frame_index/progress),
+  - robometer_zs_online, robometer_ft_online: plain per-frame JSON (points/frame_index/progress),
     same shape as manual -- aligned via a1/a2's frame_index +
     linear-interpolation method (build_rows/align_to_reference).
   - recap_ft, icvfe_8800, icvfe_ema_0.5: per-trajectory .npz curve files
@@ -47,10 +48,8 @@ Evaluator formats in this roster are NOT uniform:
     episode's context replicates (n = replicate count, not frame count);
     task/total average the resulting episode-level numbers (not
     frame-pooling, which would inflate effective sample size by repeating
-    the same reference curve once per replicate). This is a different
-    aggregation *derivation* than robometer_ft's frame-pooled numbers, so
-    don't read them as directly comparable in derivation -- see study-1
-    README for the full rationale.
+    the same reference curve once per replicate). The flat robometer sources
+    use the same episode-then-average convention (see build_flat_rows).
 
 Usage:
     python a3_pipeline.py            # extract (if needed) + compute + write CSVs to output/
@@ -82,13 +81,14 @@ REFERENCE = "manual"
 # name -> (subdir under DATA_ROOT, archive filename)
 ARCHIVES = {
     "manual": ("manual", "manual_icl_demo_dataset_continuous.zip"),
+    "robometer_zs_online": ("robometer", "zeroshot_robometer_online_icl_demo_dataset_continuous.zip"),
     "robometer_ft_online": ("robometer", "finetuned_robometer_online_icl_demo_dataset_continuous.zip"),
     "recap_ft": ("RECAP", "recap_20000_icl_demo_dataset_continuous.zip"),
     "icvfe_8800": ("ICVFE", "icvfe_8800_icl_demo_dataset_continuous.zip"),
     "icvfe_ema_0.5": ("ICVFE", "icvfe_ema_0.5_icl_demo_dataset_continuous.zip"),
 }
 
-FLAT_ROSTER = ["robometer_ft_online"]   # plain per-frame JSON, frame-pooled
+FLAT_ROSTER = ["robometer_zs_online", "robometer_ft_online"]   # plain per-frame JSON, episode-averaged
 NPZ_ROSTER = ["recap_ft", "icvfe_8800", "icvfe_ema_0.5"]  # per-trajectory npz, episode-averaged
 
 METRIC_PEARSON = "pearson"
@@ -202,7 +202,7 @@ def compute_all_metrics(x: np.ndarray, y: np.ndarray) -> dict:
 
 
 # --------------------------------------------------------------------------
-# Flat (frame-pooled) evaluator vs. human -- robometer_ft
+# Flat (episode-averaged) evaluators vs. human -- robometer_zs/ft_online
 # --------------------------------------------------------------------------
 
 def build_flat_rows(manual: dict, flat: dict) -> list:

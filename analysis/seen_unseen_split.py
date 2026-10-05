@@ -16,7 +16,8 @@ Both source types now use the same nested-aggregation convention (episode
 level over that episode's own frames, then average episode-level numbers --
 see a1_pipeline.build_rows / a3_pipeline.build_npz_rows for the rationale):
   - "flat" sources (topreward, gvl, robometer_zs, robodopamine_zs,
-    robometer_ft, robodopamine_ft, robometer_ft_online): recomputed here
+    robometer_ft, robodopamine_ft, robometer_zs_online, robometer_ft_online):
+    recomputed here
     from scratch -- per-episode metrics from aligned frames, restricted to
     episodes whose task falls in the given split, then averaged.
   - "npz" sources (recap_ft, icvfe_8800, icvfe_ema_0.5): each source's
@@ -142,13 +143,14 @@ def main():
         for s, m in split.items():
             rows.append({"section": "A2", "method": name, "split": s, **m})
 
-    # -- A3 flat source (robometer_ft_online) --
+    # -- A3 flat sources (robometer_zs_online, robometer_ft_online) --
     a3.extract_archives()
     manual_a3 = a3.load_curve_set(a3.REFERENCE)
-    curve_set = a3.load_curve_set("robometer_ft_online")
-    split = flat_split_metrics(manual_a3, curve_set, a3.align_to_reference, a3.compute_all_metrics)
-    for s, m in split.items():
-        rows.append({"section": "A3", "method": "robometer_ft_online", "split": s, **m})
+    for name in a3.FLAT_ROSTER:
+        curve_set = a3.load_curve_set(name)
+        split = flat_split_metrics(manual_a3, curve_set, a3.align_to_reference, a3.compute_all_metrics)
+        for s, m in split.items():
+            rows.append({"section": "A3", "method": name, "split": s, **m})
 
     # -- A3 npz sources (recap_ft, icvfe_8800, icvfe_ema_0.5) -- reuse existing episode_level_wide.csv
     episode_wide_path = os.path.join(HERE, "output", "A3-online ft models vs human", "episode_level_wide.csv")

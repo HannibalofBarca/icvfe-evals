@@ -220,12 +220,15 @@ HF dataset). Value-model ablations (A) are scored against the human (manual)
 progress curves with Pearson r, Kendall tau-b and MAE at episode / task / total
 granularity. Sparse evaluators are aligned by `frame_index` and linearly
 interpolated onto the dense human curve, not zipped by list position.
+Task-, split- and total-level numbers are **episode-averaged**: each episode is
+scored on its own frames, then episode scores are averaged. Frames are never
+pooled across episodes.
 
 | Script | What it tests | Output |
 |---|---|---|
 | `analysis/a1_pipeline.py` | **A1 — reward model roster.** Zero-shot TOPReward, GVL, RoboMeter and RoboDopamine vs. human. The only place TOPReward and GVL are scored. | `output/A1-reward model ablation/` |
 | `analysis/a2_pipeline.py` | **A2 — fine-tuned vs. zero-shot.** RoboMeter FT vs. ZS and RoboDopamine FT vs. ZS (non-online exports), i.e. whether in-domain adaptation helps each family. | `output/A2-finetuned vs zeroshot/` |
-| `analysis/a3_pipeline.py` | **A3 — online-eligible models vs. human.** RoboMeter FT (online), RECAP and IC-VFE (step 8800, plus causal-EMA α=0.5), i.e. the models usable at rollout time without full-episode/goal context. | `output/A3-online ft models vs human/` |
+| `analysis/a3_pipeline.py` | **A3 — online-eligible models vs. human.** RoboMeter ZS and FT (online), RECAP and IC-VFE (step 8800, plus causal-EMA α=0.5), i.e. the models usable at rollout time without full-episode/goal context. | `output/A3-online ft models vs human/` |
 | `analysis/b1_full_run.py` (+ `b1_retrieval.py`, `b1_full_run_{tasklist,shard,merge}.py` for sharded runs) | **B1 — retrieval methods.** Per task, a fixed demo-bank episode (lowest `episode_index`) is searched for the chunk that best matches every frame of every other episode, by value (RoboMeter FT online, RECAP, IC-VFE, IC-VFE EMA; RoboDopamine ZS as an upper-bound reference), by DINO visual distance, and by a naive unweighted value + vision sum. | `output/b1_full_run/` |
 | `analysis/b2_lambda_sweep.py` | **B2 — vision/value mixing weight.** Retrieval score `λ·value_dist + (1−λ)·vision_dist` for λ ∈ {0, 0.25, 0.5, 0.75, 1} over the B1 online-eligible value sources (no RoboDopamine). | `output/B2-vision value lambda sweep/`, `output/B2-lambda sweep summary/` |
 
