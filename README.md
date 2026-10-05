@@ -16,21 +16,23 @@ hf download Hannibal52Barca/icl-vfe-eval-results --repo-type dataset --local-dir
 
 Everything lives under `data/demo_set_annotations/demo_set_annotations/`:
 
-| Folder | Archive | Model | Type |
-|---|---|---|---|
-| `manual/` | `manual_icl_demo_dataset_{continuous,milestone}.zip` | Human annotation (reference) | – |
-| `robo_dopamine/` | `zs_robodopamine_…`, `finetuned_robodopamine_…` | Robo-Dopamine GRM, zero-shot / fine-tuned | Offline |
-| `robometer/` | `zeroshot_robometer_…`, `finetuned_robometer_…` | RoboMeter-4B, zero-shot / fine-tuned | Offline |
-| `topreward/` | `zs_topreward_…` | TOPReward, zero-shot | Offline |
-| `gvl/` | `zs_gvl_…` | GVL, zero-shot | Offline |
-| `robometer/` | `zeroshot_robometer_online_…`, `finetuned_robometer_online_…` | RoboMeter-4B online, zero-shot / fine-tuned | Online |
-| `RECAP/` | `recap_20000_…` | π0.6 RECAP-style VFE, step 20000 (no context) | Online |
-| `ICVFE/` | `icvfe_8800_…`, `icvfe_ema_0.5_…` | IC-VFE step 8800, raw / causal EMA α=0.5 | Online |
-| `dino/` | `dino_base_…` | DINOv2 embeddings (retrieval only) | – |
-| `SARM/` | `sarm_…_subtasks.zip` | SARM subtask annotations | – |
+| Method | Model | Type |
+|---|---|---|
+| Manual | Human annotation (reference) | – |
+| Robo-Dopamine | Robo-Dopamine GRM, zero-shot / fine-tuned | Offline |
+| RoboMeter | RoboMeter-4B, zero-shot / fine-tuned | Offline |
+| TOPReward | TOPReward, zero-shot | Offline |
+| GVL | GVL, zero-shot | Offline |
+| RoboMeter (online) | RoboMeter-4B online, zero-shot / fine-tuned | Online |
+| RECAP | π0.6 RECAP-style VFE, step 20000 (no context) | Online |
+| IC-VFE | IC-VFE step 8800, raw / causal EMA α=0.5 | Online |
+| DINO\* | DINOv2 embeddings | – |
+| SARM\* | SARM subtask annotations | – |
 
-The manual, zero-shot Robo-Dopamine, fine-tuned RoboMeter and DINO archives are
-hosted in sibling datasets; the HF dataset card lists where to place them.
+\* Not scored as a value model. DINO is used only for the embedding distance in
+B1/B2 retrieval. SARM is not used in these analyses.
+
+Some archives are hosted in sibling datasets; the HF dataset card lists where to place them.
 
 ## Scoring
 
