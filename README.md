@@ -8,7 +8,7 @@ retrieval experiments.
 
 Download the archives from the
 [icl-vfe-eval-results](https://huggingface.co/datasets/Hannibal52Barca/icl-vfe-eval-results)
-HF dataset into this repo (paths match):
+HF dataset into this repo:
 
 ```bash
 hf download Hannibal52Barca/icl-vfe-eval-results --repo-type dataset --local-dir .
@@ -27,13 +27,15 @@ Everything lives under `data/demo_set_annotations/demo_set_annotations/`:
 | GVL (zero-shot) | GVL | Offline |
 | RoboMeter online (zero-shot) | RoboMeter-4B | Online |
 | RoboMeter online (fine-tuned) | RoboMeter-4B | Online |
-| RECAP | π0.6 RECAP-style VFE, step 20000 (no context) | Online |
-| IC-VFE | IC-VFE step 8800, raw / causal EMA α=0.5 | Online |
+| RECAP | π0.6 RECAP-style VFE | Online |
+| IC-VFE | IC-VFE | Online |
 | DINO\* | DINOv2 embeddings | – |
 | SARM\* | SARM subtask annotations | – |
 
 \* Not scored as a value model. DINO is used only for the embedding distance in
-B1/B2 retrieval. SARM is not used in these analyses.
+B1/B2 retrieval.
+
+\* SARM is not used in these analyses.
 
 Some archives are hosted in sibling datasets; the HF dataset card lists where to place them.
 
