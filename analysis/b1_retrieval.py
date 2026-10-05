@@ -44,7 +44,7 @@ import pandas as pd
 
 from b_metrics import (
     DinoIndex, CHUNK_HORIZON, _episode_length, _episodes_meta,
-    ttc_error, video_dtw_error, bc_error, naive_dino_error,
+    ttc_error, video_chunk_error, bc_error, naive_dino_error,
 )
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -171,7 +171,7 @@ def main():
                 rows.append({
                     "query_uid": q_uid, "query_frame": q_frame, "method": method, "retrieved_frame": r_frame,
                     "ttc_error": ttc_error(q_uid, q_frame, ep1_uid, r_frame),
-                    "video_dtw_error": video_dtw_error(dino, q_uid, q_frame, ep1_uid, r_frame),
+                    "video_chunk_error": video_chunk_error(dino, q_uid, q_frame, ep1_uid, r_frame),
                     "bc_error": bc_error(q_uid, q_frame, ep1_uid, r_frame),
                     "naive_dino_error": naive_dino_error(dino, q_uid, q_frame, ep1_uid, r_frame),
                 })
@@ -183,7 +183,7 @@ def main():
     print(f"\nWrote {out_path} ({len(df)} rows)")
 
     print("\nMean metric by method:")
-    print(df.groupby("method")[["ttc_error", "video_dtw_error", "bc_error", "naive_dino_error"]].mean().to_string())
+    print(df.groupby("method")[["ttc_error", "video_chunk_error", "bc_error", "naive_dino_error"]].mean().to_string())
 
 
 if __name__ == "__main__":

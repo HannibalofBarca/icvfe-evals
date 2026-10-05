@@ -28,7 +28,7 @@ import time
 import numpy as np
 import pandas as pd
 
-from b_metrics import DinoIndex, VepIndex, CHUNK_HORIZON, _episode_length, ttc_error, video_dtw_error, bc_error
+from b_metrics import DinoIndex, VepIndex, CHUNK_HORIZON, _episode_length, ttc_error, video_chunk_error, bc_error
 from b1_retrieval import ep1_for_task, query_episodes_for_task, load_manual
 from b1_full_run import dense_embeddings
 
@@ -75,7 +75,7 @@ def run_task(task: str, manual: dict, dino: DinoIndex, vep: VepIndex) -> list[di
                 "task": task, "query_uid": q_uid, "query_frame": qf,
                 "method": "vep", "ep1_uid": ep1_uid, "retrieved_frame": rf,
                 "ttc_error": ttc_error(q_uid, qf, ep1_uid, rf),
-                "video_dtw_error": video_dtw_error(dino, q_uid, qf, ep1_uid, rf),
+                "video_chunk_error": video_chunk_error(dino, q_uid, qf, ep1_uid, rf),
                 "bc_error": bc_error(q_uid, qf, ep1_uid, rf),
             })
     return rows
@@ -103,7 +103,7 @@ def main():
     print(f"\nWrote {out_path} ({len(df)} rows), total time {time.time()-t0:.1f}s", flush=True)
 
     print("\nMean metric (vep method, all covered tasks pooled):")
-    print(df[["ttc_error", "video_dtw_error", "bc_error"]].mean().to_string())
+    print(df[["ttc_error", "video_chunk_error", "bc_error"]].mean().to_string())
 
 
 if __name__ == "__main__":

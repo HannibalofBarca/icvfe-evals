@@ -25,12 +25,16 @@ framing in Eval_Research_Summary.md's "Metrics To Calculate" table):
    "retrieved chunk" (same window anchored at retrieved_frame in the
    retrieved episode).
 
-3. BC error -- identical windowing to videoDTW, but DTW'd over raw action
-   vectors instead of DINO embeddings (action.q_target + action.gripper +
-   action.base_vel + action.lift_cmd, concatenated in a fixed, self-consistent
-   order -- order doesn't need to match the FAST tokenizer's training
-   convention here, since this is a raw continuous-space DTW distance, not
-   tokenization).
+3. BC error -- identical windowing to videoDTW, but a direct mean absolute
+   error (L1) over raw action vectors instead of DINO embeddings
+   (action.q_target + action.gripper + action.base_vel + action.lift_cmd,
+   concatenated in a fixed, self-consistent order -- order doesn't need to
+   match the FAST tokenizer's training convention here, since this is a raw
+   continuous-space distance, not tokenization). L1 rather than DTW because
+   both chunks are the same fixed horizon anchored at a known frame
+   correspondence -- no warping needed -- matching the standard
+   action-chunking behavior-cloning loss (e.g. ACT, Zhao et al. 2023) rather
+   than this project's earlier (superseded) DTW formulation.
 
 4. naive DINO error -- single-frame embedding distance between the query
    frame's DINO embedding and the retrieved chunk's *first* frame (i.e.
@@ -271,19 +275,35 @@ def ttc_error(query_uid: str, query_frame: int, retrieved_uid: str, retrieved_fr
     return abs(ttc_retrieved - ttc_query)
 
 
-def video_dtw_error(embeddings: EmbeddingIndex, query_uid: str, query_frame: int,
-                     retrieved_uid: str, retrieved_frame: int, horizon: int = CHUNK_HORIZON) -> float:
-    """DTW error over an embedding sequence -- pass a DinoIndex or VepIndex."""
+def video_chunk_error(embeddings: EmbeddingIndex, query_uid: str, query_frame: int,
+                       retrieved_uid: str, retrieved_frame: int, horizon: int = CHUNK_HORIZON) -> float:
+    """Mean absolute error (L1) between the retrieved and reference frame-embedding
+    chunks -- same formulation as bc_error, pass a DinoIndex or VepIndex. No DTW
+    alignment: both chunks are the same fixed horizon anchored at a known frame
+    correspondence. Chunks are truncated to the shorter length if either runs
+    past its episode's end."""
     current_chunk = embeddings.sequence(query_uid, query_frame, horizon)
     retrieved_chunk = embeddings.sequence(retrieved_uid, retrieved_frame, horizon)
-    return dtw_path_normalized(retrieved_chunk, current_chunk)
+    n = min(len(current_chunk), len(retrieved_chunk))
+    if n == 0:
+        return float("nan")
+    return float(np.mean(np.abs(retrieved_chunk[:n] - current_chunk[:n])))
 
 
 def bc_error(query_uid: str, query_frame: int, retrieved_uid: str, retrieved_frame: int,
              horizon: int = CHUNK_HORIZON) -> float:
+    """Mean absolute error (L1) between the retrieved and needed action chunks,
+    matching the standard action-chunking behavior-cloning loss (e.g. ACT,
+    Zhao et al. 2023) rather than a DTW alignment -- both chunks are the same
+    fixed horizon anchored at a known frame correspondence, so no temporal
+    warping is needed. Chunks are truncated to the shorter length if either
+    runs past its episode's end."""
     needed = action_sequence(query_uid, query_frame, horizon)
     retrieved = action_sequence(retrieved_uid, retrieved_frame, horizon)
-    return dtw_path_normalized(retrieved, needed)
+    n = min(len(needed), len(retrieved))
+    if n == 0:
+        return float("nan")
+    return float(np.mean(np.abs(retrieved[:n] - needed[:n])))
 
 
 def naive_dino_error(embeddings: EmbeddingIndex, query_uid: str, query_frame: int,
@@ -312,14 +332,14 @@ def main():
     print("\n-- identity retrieval (query==retrieved), expect ~0 error on all four --")
     q_frame = 20
     print("ttc_error       :", ttc_error(uid_a, q_frame, uid_a, q_frame))
-    print("video_dtw_error :", video_dtw_error(dino, uid_a, q_frame, uid_a, q_frame))
+    print("video_chunk_error:", video_chunk_error(dino, uid_a, q_frame, uid_a, q_frame))
     print("bc_error        :", bc_error(uid_a, q_frame, uid_a, q_frame))
     print("naive_dino_error:", naive_dino_error(dino, uid_a, q_frame, uid_a, q_frame))
 
     print("\n-- cross-episode retrieval (arbitrary, same task), expect nonzero --")
     r_frame = 15
     print("ttc_error       :", ttc_error(uid_a, q_frame, uid_b, r_frame))
-    print("video_dtw_error :", video_dtw_error(dino, uid_a, q_frame, uid_b, r_frame))
+    print("video_chunk_error:", video_chunk_error(dino, uid_a, q_frame, uid_b, r_frame))
     print("bc_error        :", bc_error(uid_a, q_frame, uid_b, r_frame))
     print("naive_dino_error:", naive_dino_error(dino, uid_a, q_frame, uid_b, r_frame))
 

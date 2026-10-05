@@ -18,6 +18,7 @@
   --s-robodopamine: #d95926;
   --s-robometer: #199e70;
   --s-icvfe: #c98500;
+  --s-recap: #d7263d;
 }
 
 :root[data-theme="light"] {
@@ -38,6 +39,7 @@
   --s-robodopamine: #eb6834;
   --s-robometer: #1baf7a;
   --s-icvfe: #eda100;
+  --s-recap: #e8435a;
 }
 
 * { box-sizing: border-box; }
@@ -164,9 +166,43 @@ button:disabled:hover { border-color: var(--border); }
   color: var(--text-dim);
 }
 
+/* ---------- Video + chart row ---------- */
+#mediaRow {
+  flex: 1;
+  min-height: 280px;
+  display: flex;
+  gap: 12px;
+}
+
+#videoPanel {
+  flex: 0 0 360px;
+  max-width: 42%;
+  position: relative;
+  background: #000;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#videoPanel[hidden] { display: none; }
+#videoPanel video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+#videoPanel .cam-label {
+  position: absolute;
+  bottom: 6px;
+  left: 8px;
+  font-size: 11px;
+  color: #ddd;
+  background: rgba(0, 0, 0, 0.5);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
 /* ---------- Chart ---------- */
 #chartSection {
   flex: 1;
+  min-width: 0;
   min-height: 280px;
   display: flex;
   background: var(--bg-panel);
@@ -184,6 +220,7 @@ button:disabled:hover { border-color: var(--border); }
 #valueChart .chart-axis { stroke: var(--text-dim); stroke-width: 1; }
 #valueChart .chart-axis-label { fill: var(--text-dim); font-size: 11px; font-family: inherit; }
 #valueChart .chart-line { fill: none; stroke-width: 2.25; stroke-linecap: round; stroke-linejoin: round; }
+#valueChart .chart-line.chart-line-raw { stroke-width: 1; }
 #valueChart .chart-playhead { stroke: var(--playhead-color); stroke-width: 1.5; opacity: 0.85; }
 #valueChart .chart-playhead-dot { opacity: 0.95; }
 
@@ -233,6 +270,9 @@ button:disabled:hover { border-color: var(--border); }
 .ctrl-sep { width: 1px; height: 22px; background: var(--border); margin: 0 6px; }
 #speedButtons { display: flex; gap: 4px; }
 #speedButtons button.active { background: var(--accent-dim); border-color: var(--accent); }
+#emaSlider { width: 110px; accent-color: var(--accent); }
+.ema-value { min-width: 3em; font-variant-numeric: tabular-nums; }
+.source-chip .note.ema-alpha { color: var(--text); font-weight: 600; }
 .hint-text { font-size: 11.5px; color: var(--text-dim); }
 
 /* ---------- Toast ---------- */
@@ -256,4 +296,6 @@ button:disabled:hover { border-color: var(--border); }
 @media (max-width: 700px) {
   #topbar { gap: 12px; }
   #taskSelect { min-width: 200px; }
+  #mediaRow { flex-direction: column; }
+  #videoPanel { flex: 0 0 220px; max-width: 100%; }
 }

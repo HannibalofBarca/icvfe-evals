@@ -41,8 +41,14 @@
 <main id="mainArea">
   <section id="legendRow"></section>
 
-  <section id="chartSection">
-    <svg id="valueChart" viewBox="0 0 1000 400" preserveAspectRatio="none"></svg>
+  <section id="mediaRow">
+    <div id="videoPanel" hidden>
+      <video id="camZed" muted playsinline></video>
+      <span class="cam-label">zed (main cam)</span>
+    </div>
+    <section id="chartSection">
+      <svg id="valueChart" viewBox="0 0 1000 400" preserveAspectRatio="none"></svg>
+    </section>
   </section>
 
   <div id="scrubber">
@@ -70,7 +76,13 @@
     <div id="speedButtons"></div>
 
     <span class="ctrl-sep"></span>
-    <span class="hint-text">No video in this export &mdash; the chart above is a synthetic playhead over the four evaluators' progress curves.</span>
+
+    <span class="tb-label" title="Smoothing applied to ICVFE/recap's raw curves">EMA &alpha;</span>
+    <input id="emaSlider" type="range" min="0.01" max="1" step="0.01" />
+    <span id="emaValueLabel" class="tb-static ema-value">0.05</span>
+
+    <span class="ctrl-sep"></span>
+    <span class="hint-text">Video is the zed (main cam) feed, streamed live from Hugging Face &mdash; playback and scrubbing stay in sync with the evaluators' progress curves.</span>
   </div>
 </main>
 

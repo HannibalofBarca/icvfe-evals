@@ -41,10 +41,11 @@ import time
 import numpy as np
 import pandas as pd
 
-from b_metrics import DinoIndex, CHUNK_HORIZON, _episode_length, ttc_error, video_dtw_error, bc_error, naive_dino_error
+from b_metrics import DinoIndex, CHUNK_HORIZON, _episode_length, ttc_error, video_chunk_error, bc_error, naive_dino_error
 from b1_retrieval import ep1_for_task, query_episodes_for_task, load_manual
 from b1_value_sources import load_all_value_sources
-from b1_full_run import dense_embeddings, dense_values
+from b1_full_run import dense_embeddings
+from seen_unseen_split import SEEN_TASKS, UNSEEN_TASKS, dense_values
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(HERE, "output", "B2-vision value lambda sweep")
@@ -78,7 +79,7 @@ def run_task(task: str, manual: dict, dino: DinoIndex, value_sources: dict[str, 
         if key not in metric_cache:
             metric_cache[key] = {
                 "ttc_error": ttc_error(q_uid, qf, ep1_uid, rf),
-                "video_dtw_error": video_dtw_error(dino, q_uid, qf, ep1_uid, rf),
+                "video_chunk_error": video_chunk_error(dino, q_uid, qf, ep1_uid, rf),
                 "bc_error": bc_error(q_uid, qf, ep1_uid, rf),
                 "naive_dino_error": naive_dino_error(dino, q_uid, qf, ep1_uid, rf),
             }
@@ -121,7 +122,7 @@ def run_task(task: str, manual: dict, dino: DinoIndex, value_sources: dict[str, 
 
 
 def write_summaries(df: pd.DataFrame) -> None:
-    metric_cols = ["ttc_error", "video_dtw_error", "bc_error", "naive_dino_error"]
+    metric_cols = ["ttc_error", "video_chunk_error", "bc_error", "naive_dino_error"]
 
     print("\nMean metric by (value_source, lambda):")
     summary = df.groupby(["value_source", "lambda"])[metric_cols].mean()
@@ -140,6 +141,28 @@ def write_summaries(df: pd.DataFrame) -> None:
     task_summary.to_csv(task_summary_path)
 
     print(f"\nWrote {summary_path}, {pooled_path}, {task_summary_path}")
+
+    # in-domain (seen) / out-of-domain (unseen) split -- same task-novelty
+    # partition as seen_unseen_split.py, applied to B1/B2 retrieval queries
+    # by the QUERY episode's task (not ep1's task, which is fixed per task
+    # anyway since ep1/queries always share one task).
+    domain = df["task"].map(lambda t: "in_domain" if t in SEEN_TASKS else "out_of_domain" if t in UNSEEN_TASKS else None)
+    assert domain.notna().all(), "task(s) outside SEEN_TASKS/UNSEEN_TASKS found in B2 results"
+    df = df.assign(domain=domain)
+
+    print("\nMean metric by (value_source, lambda, domain):")
+    domain_summary = df.groupby(["value_source", "lambda", "domain"])[metric_cols].mean()
+    print(domain_summary.to_string())
+    domain_summary_path = os.path.join(OUTPUT_DIR, "b2_domain_split_summary.csv")
+    domain_summary.to_csv(domain_summary_path)
+
+    print("\nMean metric by (lambda, domain), pooled over value sources:")
+    domain_pooled = df.groupby(["lambda", "domain"])[metric_cols].mean()
+    print(domain_pooled.to_string())
+    domain_pooled_path = os.path.join(OUTPUT_DIR, "b2_lambda_domain_summary.csv")
+    domain_pooled.to_csv(domain_pooled_path)
+
+    print(f"Wrote {domain_summary_path}, {domain_pooled_path}")
 
 
 def merge_shards(num_shards: int) -> None:

@@ -206,11 +206,18 @@ def compute_all_metrics(x: np.ndarray, y: np.ndarray) -> dict:
 # --------------------------------------------------------------------------
 
 def build_flat_rows(manual: dict, flat: dict) -> list:
+    """
+    Nested aggregation, matching build_npz_rows below: episode level is
+    computed over that episode's own aligned frames (the smallest unit
+    where pooling raw points is appropriate, since frames within an episode
+    are highly autocorrelated); task/total average the resulting
+    episode-level numbers rather than pooling frames across episodes, so
+    every episode -- not every frame -- is the unit of aggregation.
+    """
     common = sorted(set(manual).intersection(*[set(c) for c in flat.values()]))
 
     rows = []
-    pooled_frames = defaultdict(lambda: defaultdict(lambda: ([], [])))  # task -> name -> (x, y)
-    total_frames = defaultdict(lambda: ([], []))  # name -> (x, y)
+    episode_rows = defaultdict(list)  # name -> [{"task": ..., pearson, kendall_tau_b, mae}, ...]
 
     for uid in common:
         task = manual[uid]["task"]
@@ -226,30 +233,27 @@ def build_flat_rows(manual: dict, flat: dict) -> list:
                     "level": "episode", "task": task, "group_id": uid,
                     "pair": pair, "metric": metric_name, "value": value, "n": n,
                 })
-            xs, ys = pooled_frames[task][name]
-            xs.extend(a.tolist()); ys.extend(b.tolist())
-            txs, tys = total_frames[name]
-            txs.extend(a.tolist()); tys.extend(b.tolist())
+            episode_rows[name].append({"task": task, **m})
 
-    for task, names in pooled_frames.items():
-        for name, (xs, ys) in names.items():
-            x, y = np.array(xs), np.array(ys)
-            m = compute_all_metrics(x, y)
-            pair = f"{name}_vs_human"
-            for metric_name, value in m.items():
+    for name, ep_rows in episode_rows.items():
+        edf = pd.DataFrame(ep_rows)
+        pair = f"{name}_vs_human"
+
+        task_group = edf.groupby("task", as_index=False)[[METRIC_PEARSON, METRIC_KENDALL, METRIC_MAE]].mean()
+        n_ep_per_task = edf.groupby("task").size().rename("n").reset_index()
+        task_group = task_group.merge(n_ep_per_task, on="task")
+        for _, r in task_group.iterrows():
+            for metric_name in (METRIC_PEARSON, METRIC_KENDALL, METRIC_MAE):
                 rows.append({
-                    "level": "task", "task": task, "group_id": task,
-                    "pair": pair, "metric": metric_name, "value": value, "n": len(x),
+                    "level": "task", "task": r["task"], "group_id": r["task"],
+                    "pair": pair, "metric": metric_name, "value": r[metric_name], "n": int(r["n"]),
                 })
 
-    for name, (xs, ys) in total_frames.items():
-        x, y = np.array(xs), np.array(ys)
-        m = compute_all_metrics(x, y)
-        pair = f"{name}_vs_human"
-        for metric_name, value in m.items():
+        for metric_name in (METRIC_PEARSON, METRIC_KENDALL, METRIC_MAE):
             rows.append({
                 "level": "total", "task": "ALL", "group_id": "ALL",
-                "pair": pair, "metric": metric_name, "value": value, "n": len(x),
+                "pair": pair, "metric": metric_name, "value": float(edf[metric_name].mean()),
+                "n": len(edf),
             })
 
     return rows

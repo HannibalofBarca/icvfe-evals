@@ -50,12 +50,18 @@ choice of scale inflate the number 100x:
 
 - **episode** — one number per episode, computed over that episode's own
   frames (this *is* the natural unit: within one episode you have a paired
-  time series of two curves).
-- **task** — the episodes belonging to a task are pooled and one
-  correlation/MAE is computed over the pooled points (not simply the average
-  of the per-episode numbers — pooling is the standard way to summarize
-  agreement across a heterogeneous set of episodes).
-- **total** — all tasks pooled into one number.
+  time series of two curves, and it's the smallest unit where pooling raw
+  points is appropriate — frames within an episode are highly autocorrelated,
+  so they aren't independent observations of anything beyond that one episode).
+- **task** — the *average of the episode-level numbers* within the task, not
+  a pool of raw frames across episodes. Pooling frames across episodes would
+  treat every frame as an independent observation when the episode, not the
+  frame, is the actual independent sampling unit — under pooling, a longer
+  episode dominates the number just by contributing more (non-independent)
+  points, which isn't the intended notion of "agreement across a
+  heterogeneous set of episodes."
+- **total** — the average of all episode-level numbers across every task
+  (every episode weighted equally, regardless of which task it belongs to).
 
 Seven evaluator pairs are computed:
 
@@ -121,12 +127,11 @@ export):
   per replicate, artificially inflating the effective sample size).
 - **total level**: the average of all episode-level numbers.
 
-This is a deliberately different aggregation rule from the other three
-pairs (which pool raw frames). Do not read `icvfe_vs_human`/
-`icvfe_vs_robodopamine`'s task/total numbers as directly comparable in
-*derivation* to the other pairs' task/total numbers — they answer the same
-question ("how well does this evaluator track X's judgment for this task?")
-but via averaging rather than pooling.
+This is the same episode-average aggregation rule used everywhere else in
+the pipeline (see the granularity section above) — ICVFE/recap just have an
+extra averaging step first (across context replicates) to get down to one
+number per episode, since their npz export scores each query episode
+multiple times.
 
 ### recap's target is not the human curve either
 

@@ -3,10 +3,23 @@ Multi-source progress-curve visualizer for ICVFE Evals.
 
 A read-only clone of the video-annotation tool's "value vs time" chart
 (../../Manual Annotation/static/{index.html,app.js,style.css}), adapted to
-show all four evaluator curves for an episode at once -- Human, RoboDopamine,
-RoboMeter, ICVFE -- as toggleable overlaid lines, instead of one editable
-curve. No video: this project's data export doesn't carry video, only the
-progress-value JSON/npz curves already used by analysis/pipeline.py.
+show all five evaluator curves for an episode at once -- Human, RoboDopamine,
+RoboMeter (online FT), ICVFE, pi0.6-recap -- as toggleable overlaid lines,
+instead of one editable curve. RoboMeter uses the *online* fine-tuned export,
+not the base one analysis/pipeline.py uses, to match ICVFE/recap which are
+both online-only models (see analysis/a3_pipeline.py's docstring). ICVFE and
+pi0.6-recap each draw two lines under one legend chip: a faded, thin raw
+curve underlaid beneath an EMA-smoothed one (alpha adjustable client-side via
+a slider, default 0.05) -- their raw per-frame predictions are too noisy to
+read on their own at full-episode width.
+
+This project's own data export doesn't carry video, only the progress-value
+JSON/npz curves already used by analysis/pipeline.py -- but the episodes are
+drawn from a Hugging Face lerobot dataset that does, so playback streams the
+single "main cam" (zed) feed directly from HF (byte-range requests, no local
+video files or proxying) and drives the scrubber/chart playhead off the
+video's own clock instead of a synthetic one. See load_video_episode_index_map()
+for how episode_uid is joined to that dataset's video URLs.
 
 Uses only the standard library (no FastAPI/uvicorn) so it needs no extra
 install beyond numpy, which the rest of this repo already depends on.
@@ -37,9 +50,66 @@ import pipeline as pl  # noqa: E402  (analysis/pipeline.py -- extraction + cache
 SOURCE_LABELS = {
     "human": "Human",
     "robodopamine": "RoboDopamine",
-    "robometer": "RoboMeter",
-    "icvfe": "ICVFE",
+    "robometer": "RoboMeter (online FT)",
+    "icvfe": "ICVFE (raw + EMA)",
+    "recap": "pi0.6-recap (raw + EMA)",
 }
+
+# ICVFE and recap are smoothed with the same standard EMA (y[0]=x[0],
+# y[t]=alpha*x[t]+(1-alpha)*y[t-1]) and alpha analysis/paper_figures_sorting_task.py
+# uses -- their raw per-frame predictions are noisy enough to drown out the
+# trend at full-episode width, so the smoothed curve is the primary line and
+# the raw curve is sent alongside it to render as a faded underlay (same
+# convention as that script's ALPHAS/LINEWIDTHS/ZORDER). Human/RoboMeter are
+# dense annotation curves, not noisy model output, so they're left as-is.
+EMA_ALPHA = 0.05
+
+
+def ema(x: np.ndarray, alpha: float) -> np.ndarray:
+    out = np.empty_like(x, dtype=np.float64)
+    out[0] = x[0]
+    for i in range(1, len(x)):
+        out[i] = alpha * x[i] + (1.0 - alpha) * out[i - 1]
+    return out
+
+
+# --------------------------------------------------------------------------
+# Video (streamed from Hugging Face, not part of this repo's own exports)
+# --------------------------------------------------------------------------
+
+VIDEO_CAMERA = "observation.images.zed"  # "main cam" only, per ../../Manual Annotation's CAMERAS convention
+VIDEO_REPO_ID = "adityx23/icl-demo-dataset"
+# ../../obs_fix/output/icl-demo-dataset-fixed-action carries no videos of its
+# own (see its README), but it's built from VIDEO_REPO_ID with the episode
+# indices unchanged ("same source, same episode indices") -- its
+# meta/episodes.jsonl is read only for that episode_uid -> episode_index
+# join, never for video bytes.
+VIDEO_DATASET_ROOT = HERE.parent.parent / "obs_fix" / "output" / "icl-demo-dataset-fixed-action"
+
+
+def load_video_episode_index_map() -> dict:
+    """episode_uid -> episode_index in VIDEO_REPO_ID's own numbering."""
+    path = VIDEO_DATASET_ROOT / "meta" / "episodes.jsonl"
+    out = {}
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if line:
+            row = json.loads(line)
+            out[row["episode_uid"]] = row["episode_index"]
+    return out
+
+
+def load_video_chunks_size() -> int:
+    info = json.loads((VIDEO_DATASET_ROOT / "meta" / "info.json").read_text())
+    return info["chunks_size"]
+
+
+def video_url(episode_index: int) -> str:
+    chunk = episode_index // VIDEO_CHUNKS_SIZE
+    return (
+        f"https://huggingface.co/datasets/{VIDEO_REPO_ID}/resolve/main/"
+        f"videos/chunk-{chunk:03d}/{VIDEO_CAMERA}/episode_{episode_index:06d}.mp4"
+    )
 
 
 # --------------------------------------------------------------------------
@@ -66,7 +136,7 @@ def load_source(cache_subdir: str) -> dict:
 
 
 def load_icvfe_averages(common_uids: set) -> dict:
-    """episode_uid -> {"progress": np.ndarray (0-100), "n_reps": int}.
+    """episode_uid -> {"progress": ema ndarray (0-100), "raw_progress": ndarray, "n_reps": int}.
 
     Averages ICVFE's prediction curve across its in-context replicates (each
     query episode is scored once per context example drawn from the same
@@ -93,18 +163,51 @@ def load_icvfe_averages(common_uids: set) -> dict:
         sums[uid] = sums.get(uid, np.zeros_like(pred)) + pred
         counts[uid] = counts.get(uid, 0) + 1
 
-    return {uid: {"progress": sums[uid] / counts[uid], "n_reps": counts[uid]} for uid in sums}
+    out = {}
+    for uid in sums:
+        raw = sums[uid] / counts[uid]
+        out[uid] = {"progress": ema(raw, EMA_ALPHA), "raw_progress": raw, "n_reps": counts[uid]}
+    return out
+
+
+def load_recap_curves() -> dict:
+    """episode_uid -> {"progress": ema ndarray (0-100), "raw_progress": ndarray}.
+
+    Unlike ICVFE this eval is single-pass (no in-context replicates -- one
+    query pass per episode), split across "seen"/"unseen" task-novelty
+    subdirs -- same data analysis/pipeline.py's build_recap_rows reads.
+    """
+    ckpt_root = Path(pl._recap_root())
+    out = {}
+    for split in ("seen", "unseen"):
+        split_dir = ckpt_root / split
+        meta = json.loads((split_dir / "metrics.json").read_text())
+        for t in meta["trajectories"]:
+            npz_path = split_dir / "curves" / f"task_{t['task_id']:03d}_{t['demo_id']}.npz"
+            with np.load(npz_path) as d:
+                pred = np.asarray(d["prediction_progress"], dtype=np.float64) * 100.0
+            out[t["episode_uid"]] = {"progress": ema(pred, EMA_ALPHA), "raw_progress": pred}
+    return out
 
 
 print("Loading curve data (extracting archives on first run)...", file=sys.stderr)
 pl.extract_archives(force=False)
 MANUAL = load_source("manual")
-ROBOMETER = load_source("finetuned_robometer")
+# The *online* fine-tuned export (finetuned_robometer_online_icl_demo_dataset_continuous),
+# not the base one pl.ROBOMETER_ARCHIVE/analysis/pipeline.py uses -- ICVFE and
+# recap are both online-only models (see analysis/a3_pipeline.py's docstring),
+# so RoboMeter needs the same online variant to be a fair, consistent comparison.
+ROBOMETER = load_source("finetuned_robometer_online")
 ROBODOP = load_source("zs_robodopamine")
 
 COMMON_UIDS = set(MANUAL) & set(ROBOMETER) & set(ROBODOP)
 ICVFE_AVG = load_icvfe_averages(COMMON_UIDS)
-print(f"Loaded {len(COMMON_UIDS)} episodes ({len(ICVFE_AVG)} with an ICVFE curve)", file=sys.stderr)
+RECAP = load_recap_curves()
+VIDEO_EPISODE_INDEX = load_video_episode_index_map()
+VIDEO_CHUNKS_SIZE = load_video_chunks_size()
+n_with_video = len(COMMON_UIDS & set(VIDEO_EPISODE_INDEX))
+print(f"Loaded {len(COMMON_UIDS)} episodes ({len(ICVFE_AVG)} with an ICVFE curve, "
+      f"{len(RECAP)} with a recap curve, {n_with_video} with video)", file=sys.stderr)
 
 TASK_NAMES = sorted({MANUAL[u]["task"] for u in COMMON_UIDS})
 TASK_INDEX_BY_NAME = {name: i for i, name in enumerate(TASK_NAMES)}
@@ -137,6 +240,8 @@ def build_episode_list(task_index: int) -> list:
             "num_frames": MANUAL[uid]["num_frames"],
             "success": MANUAL[uid]["success"],
             "has_icvfe": uid in ICVFE_AVG,
+            "has_recap": uid in RECAP,
+            "has_video": uid in VIDEO_EPISODE_INDEX,
         }
         for i, uid in enumerate(uids)
     ]
@@ -147,13 +252,17 @@ def build_episode_payload(task_index: int, position: int) -> dict:
     uid = uids[position - 1]
     m = MANUAL[uid]
 
-    def series(entry_progress, n_reps=None):
+    def series(entry_progress, n_reps=None, raw_progress=None):
         payload = {"available": True, "progress": [round(v, 3) for v in entry_progress.tolist()]}
         if n_reps is not None:
             payload["n_reps"] = n_reps
+        if raw_progress is not None:
+            payload["raw_progress"] = [round(v, 3) for v in raw_progress.tolist()]
         return payload
 
     icvfe = ICVFE_AVG.get(uid)
+    recap = RECAP.get(uid)
+    video_index = VIDEO_EPISODE_INDEX.get(uid)
 
     return {
         "task_index": task_index,
@@ -164,11 +273,13 @@ def build_episode_payload(task_index: int, position: int) -> dict:
         "num_frames": m["num_frames"],
         "fps": m["fps"],
         "dataset_success": m["success"],
+        "video_url": video_url(video_index) if video_index is not None else None,
         "series": {
             "human": series(m["progress"]),
             "robodopamine": series(ROBODOP[uid]["progress"]),
             "robometer": series(ROBOMETER[uid]["progress"]),
-            "icvfe": series(icvfe["progress"], icvfe["n_reps"]) if icvfe else {"available": False},
+            "icvfe": series(icvfe["progress"], icvfe["n_reps"], icvfe["raw_progress"]) if icvfe else {"available": False},
+            "recap": series(recap["progress"], raw_progress=recap["raw_progress"]) if recap else {"available": False},
         },
     }
 

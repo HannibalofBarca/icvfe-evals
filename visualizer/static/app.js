@@ -2,8 +2,17 @@
   "use strict";
 
   const SPEEDS = [0.25, 0.5, 1, 2, 4, 8];
-  const SOURCES = ["human", "robodopamine", "robometer", "icvfe"];
-  const SOURCE_LABELS = { human: "Human", robodopamine: "RoboDopamine", robometer: "RoboMeter", icvfe: "ICVFE" };
+  const SOURCES = ["human", "robodopamine", "robometer", "icvfe", "recap"];
+  const SOURCE_LABELS = { human: "Human", robodopamine: "RoboDopamine", robometer: "RoboMeter (online FT)", icvfe: "ICVFE (raw + EMA)", recap: "pi0.6-recap (raw + EMA)" };
+  // ICVFE/recap raw predictions are dense per-frame noise -- each draws a
+  // faded, thin underlay of its raw curve beneath an EMA-smoothed main line
+  // (alpha adjustable live via the slider, recomputed client-side from the
+  // same raw_progress array -- see ema()/computeEffective()), under the
+  // same legend chip. Human/RoboDopamine/RoboMeter have no raw counterpart
+  // and render unchanged.
+  const RAW_UNDERLAY_SOURCES = new Set(["icvfe", "recap"]);
+  const RAW_UNDERLAY_OPACITY = 0.4;
+  const DEFAULT_EMA_ALPHA = 0.05;
 
   const S = {
     tasks: [],
@@ -13,13 +22,40 @@
     fps: 30,
     numFrames: 0,
     duration: 0,
-    visible: { human: true, robodopamine: true, robometer: true, icvfe: true },
+    visible: { human: true, robodopamine: true, robometer: true, icvfe: true, recap: true },
+    emaAlpha: DEFAULT_EMA_ALPHA,
+    effective: {},
+    hasVideo: false,
     playbackRate: 1,
     isPlaying: false,
     currentTime: 0,
     rafId: null,
     lastTs: null,
   };
+
+  // Standard EMA: y[0]=x[0], y[t]=alpha*x[t]+(1-alpha)*y[t-1] -- same
+  // convention as analysis/paper_figures_sorting_task.py and server.py's
+  // own ema(), recomputed here so the slider needs no server round-trip.
+  function ema(x, alpha) {
+    const out = new Array(x.length);
+    out[0] = x[0];
+    for (let i = 1; i < x.length; i++) out[i] = alpha * x[i] + (1 - alpha) * out[i - 1];
+    return out;
+  }
+
+  // {src: progress array actually plotted as the main line} -- EMA-smoothed
+  // at S.emaAlpha for icvfe/recap (from their raw_progress), server-supplied
+  // progress unchanged for everything else. Recomputed on episode load and
+  // on every slider move.
+  function computeEffective() {
+    const out = {};
+    for (const src of SOURCES) {
+      const s = S.episode.series[src];
+      if (!s.available) continue;
+      out[src] = RAW_UNDERLAY_SOURCES.has(src) && s.raw_progress ? ema(s.raw_progress, S.emaAlpha) : s.progress;
+    }
+    S.effective = out;
+  }
 
   // ---------------------------------------------------------------- DOM refs
   const $ = (id) => document.getElementById(id);
@@ -33,6 +69,10 @@
   const themeToggleBtn = $("themeToggleBtn");
 
   const legendRow = $("legendRow");
+  const emaSlider = $("emaSlider");
+  const emaValueLabel = $("emaValueLabel");
+  const videoPanel = $("videoPanel");
+  const camZed = $("camZed");
   const valueChartSvg = $("valueChart");
   const scrubber = $("scrubber");
   const scrubFill = $("scrubFill");
@@ -154,6 +194,7 @@
     S.numFrames = ep.num_frames;
     S.duration = ep.num_frames / ep.fps;
     S.currentTime = 0;
+    computeEffective();
 
     posLabel.textContent = `${ep.position} / ${ep.total_in_task}`;
     searchBox.value = ep.position;
@@ -169,6 +210,17 @@
       datasetOutcomeTag.classList.add("ds-fail");
     } else {
       datasetOutcomeTag.textContent = "Dataset: unknown";
+    }
+
+    S.hasVideo = !!ep.video_url;
+    videoPanel.hidden = !S.hasVideo;
+    if (S.hasVideo) {
+      camZed.src = ep.video_url;
+      camZed.load();
+      camZed.playbackRate = S.playbackRate;
+    } else {
+      camZed.removeAttribute("src");
+      camZed.load();
     }
 
     renderLegend();
@@ -189,11 +241,13 @@
         </div>`;
       }
       const note = s.n_reps ? `<span class="note">avg of ${s.n_reps} in-context replicates</span>` : "";
+      const alphaBadge = RAW_UNDERLAY_SOURCES.has(src) && s.raw_progress
+        ? `<span class="note ema-alpha">α=${S.emaAlpha.toFixed(2)}</span>` : "";
       return `<div class="source-chip${off}" data-src="${src}">
         <span class="swatch" style="background:${seriesColor(src)}"></span>
         <span class="name">${SOURCE_LABELS[src]}</span>
         <span class="value" data-value-for="${src}">–</span>
-        ${note}
+        ${note}${alphaBadge}
       </div>`;
     }).join("");
 
@@ -263,18 +317,27 @@
     parts.push(`<line class="chart-axis" x1="${CHART_PAD_LEFT}" y1="${CHART_PAD_TOP}" x2="${CHART_PAD_LEFT}" y2="${chartH - CHART_PAD_BOTTOM}" />`);
     parts.push(`<line class="chart-axis" x1="${CHART_PAD_LEFT}" y1="${chartH - CHART_PAD_BOTTOM}" x2="${chartW - CHART_PAD_RIGHT}" y2="${chartH - CHART_PAD_BOTTOM}" />`);
 
+    const pointsFor = (progress) => {
+      const fps = S.fps;
+      const pts = [];
+      for (let i = 0; i < progress.length; i++) {
+        pts.push(`${chartXForTime(i / fps).toFixed(1)},${chartYForValue(progress[i]).toFixed(1)}`);
+      }
+      return pts.join(" ");
+    };
+
+    // Raw underlays first (faded, thin) so the smoothed main lines below draw on top.
+    for (const src of SOURCES) {
+      if (!RAW_UNDERLAY_SOURCES.has(src)) continue;
+      const s = S.episode.series[src];
+      if (!s.available || !S.visible[src] || !s.raw_progress) continue;
+      parts.push(`<polyline class="chart-line chart-line-raw" points="${pointsFor(s.raw_progress)}" stroke="${seriesColor(src)}" stroke-opacity="${RAW_UNDERLAY_OPACITY}" />`);
+    }
+
     for (const src of SOURCES) {
       const s = S.episode.series[src];
       if (!s.available || !S.visible[src]) continue;
-      const progress = s.progress;
-      const n = progress.length;
-      const fps = S.fps;
-      const pts = [];
-      for (let i = 0; i < n; i++) {
-        const t = i / fps;
-        pts.push(`${chartXForTime(t).toFixed(1)},${chartYForValue(progress[i]).toFixed(1)}`);
-      }
-      parts.push(`<polyline class="chart-line" points="${pts.join(" ")}" stroke="${seriesColor(src)}" />`);
+      parts.push(`<polyline class="chart-line" points="${pointsFor(S.effective[src])}" stroke="${seriesColor(src)}" />`);
     }
 
     parts.push(`<line id="chartPlayhead" class="chart-playhead" x1="${CHART_PAD_LEFT}" y1="${CHART_PAD_TOP}" x2="${CHART_PAD_LEFT}" y2="${chartH - CHART_PAD_BOTTOM}" />`);
@@ -309,9 +372,8 @@
     line.setAttribute("x2", x);
     for (const src of SOURCES) {
       const dot = document.getElementById(`dot-${src}`);
-      if (!dot) continue;
-      const s = S.episode.series[src];
-      const y = chartYForValue(valueAtTime(s.progress, t));
+      if (!dot || !S.effective[src]) continue;
+      const y = chartYForValue(valueAtTime(S.effective[src], t));
       dot.setAttribute("cx", x);
       dot.setAttribute("cy", y.toFixed(1));
     }
@@ -320,9 +382,8 @@
   function updateReadouts(t) {
     for (const src of SOURCES) {
       const el = legendRow.querySelector(`[data-value-for="${src}"]`);
-      if (!el) continue;
-      const s = S.episode.series[src];
-      el.textContent = valueAtTime(s.progress, t).toFixed(1);
+      if (!el || !S.effective[src]) continue;
+      el.textContent = valueAtTime(S.effective[src], t).toFixed(1);
     }
   }
 
@@ -352,16 +413,28 @@
   scrubber.addEventListener("pointerup", () => (scrubbing = false));
 
   // ----------------------------------------------------------- playhead / seek
-  function seekTo(t) {
-    S.currentTime = Math.max(0, Math.min(t, S.duration || t));
-    const frac = S.duration ? S.currentTime / S.duration : 0;
+  // updateVisuals() drives everything that reads the clock (scrubber, chart
+  // playhead, legend readouts) off a given time -- called both from seekTo()
+  // (user-initiated repositioning) and from the video's own "timeupdate"
+  // (playback), so both paths stay in sync without fighting each other.
+  function updateVisuals(t) {
+    const frac = S.duration ? t / S.duration : 0;
     scrubPlayhead.style.left = `${frac * 100}%`;
     scrubFill.style.width = `${frac * 100}%`;
-    const frame = Math.round(S.currentTime * S.fps);
-    timeText.textContent = formatTime(S.currentTime);
+    const frame = Math.round(t * S.fps);
+    timeText.textContent = formatTime(t);
     frameText.textContent = `frame ${frame} / ${Math.max(0, S.numFrames - 1)}`;
-    updateChartPlayhead(S.currentTime);
-    updateReadouts(S.currentTime);
+    updateChartPlayhead(t);
+    updateReadouts(t);
+  }
+
+  function seekTo(t) {
+    S.currentTime = Math.max(0, Math.min(t, S.duration || t));
+    if (S.hasVideo) {
+      const d = camZed.duration;
+      camZed.currentTime = isFinite(d) ? Math.min(S.currentTime, d) : S.currentTime;
+    }
+    updateVisuals(S.currentTime);
   }
 
   function stepFrames(n) {
@@ -375,10 +448,26 @@
   $("stepFwdFrame").addEventListener("click", () => stepFrames(1));
   $("stepFwd10").addEventListener("click", () => stepFrames(10));
 
-  // ------------------------------------------------------ playback (no video)
-  // There's no video to sync against in this export, so "play" advances a
-  // virtual clock at wall-clock speed (scaled by S.playbackRate) via rAF,
-  // driving the same seekTo() the scrubber and chart clicks use.
+  // ------------------------------------------------------------- playback
+  // When the episode has video, the <video> element is the clock: its own
+  // "timeupdate" drives updateVisuals() at native playback rate/precision,
+  // and play/pause control it directly. Episodes without a resolved video
+  // (see server.py's video_url()) fall back to a synthetic rAF clock at
+  // wall-clock speed (scaled by S.playbackRate), driving the same seekTo()
+  // the scrubber and chart clicks use.
+  camZed.addEventListener("timeupdate", () => {
+    if (!S.hasVideo || S.rafId != null) return;
+    S.currentTime = camZed.currentTime || 0;
+    updateVisuals(S.currentTime);
+  });
+  camZed.addEventListener("ended", () => stopPlayback());
+  camZed.addEventListener("error", () => {
+    if (!S.hasVideo) return;
+    S.hasVideo = false;
+    videoPanel.hidden = true;
+    toast("Video failed to load for this episode; falling back to chart-only playback.", true);
+  });
+
   function playTick(ts) {
     if (!S.isPlaying) return;
     if (S.lastTs != null) {
@@ -401,14 +490,19 @@
     }
     if (S.currentTime >= S.duration) seekTo(0);
     S.isPlaying = true;
-    S.lastTs = null;
     updatePlayButton();
-    S.rafId = requestAnimationFrame(playTick);
+    if (S.hasVideo) {
+      camZed.play().catch(() => {});
+    } else {
+      S.lastTs = null;
+      S.rafId = requestAnimationFrame(playTick);
+    }
   }
   function stopPlayback() {
     S.isPlaying = false;
     if (S.rafId != null) cancelAnimationFrame(S.rafId);
     S.rafId = null;
+    if (S.hasVideo) camZed.pause();
     updatePlayButton();
   }
   function updatePlayButton() {
@@ -420,9 +514,23 @@
   speedButtonsEl.querySelectorAll("button").forEach((btn) => {
     btn.addEventListener("click", () => {
       S.playbackRate = parseFloat(btn.dataset.speed);
+      camZed.playbackRate = S.playbackRate;
       speedButtonsEl.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
     });
     if (parseFloat(btn.dataset.speed) === 1) btn.classList.add("active");
+  });
+
+  // -------------------------------------------------------------- EMA slider
+  emaSlider.value = String(S.emaAlpha);
+  emaValueLabel.textContent = S.emaAlpha.toFixed(2);
+  emaSlider.addEventListener("input", () => {
+    S.emaAlpha = parseFloat(emaSlider.value);
+    emaValueLabel.textContent = S.emaAlpha.toFixed(2);
+    if (!S.episode) return;
+    computeEffective();
+    renderLegend();
+    renderChart();
+    updateVisuals(S.currentTime);
   });
 
   // -------------------------------------------------------------- keyboard

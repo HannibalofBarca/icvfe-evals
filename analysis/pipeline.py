@@ -154,11 +154,20 @@ def compute_all_metrics(x: np.ndarray, y: np.ndarray) -> dict:
 # --------------------------------------------------------------------------
 
 def build_raw_curve_rows(manual: dict, robometer: dict, robodop: dict) -> list:
-    """Episode-level rows for the three raw-curve pairs."""
+    """Episode/task/total rows for the three raw-curve pairs.
+
+    Nested aggregation: episode level is computed over that episode's own
+    frames (the smallest unit where pooling raw points is appropriate,
+    since frames within an episode are highly autocorrelated -- pooling
+    across episodes would let longer episodes dominate the number just by
+    contributing more non-independent points). Task/total average the
+    resulting episode-level numbers instead, treating the episode -- the
+    actual independent sampling unit -- as what gets aggregated. Matches
+    the aggregation `a3_pipeline.build_npz_rows` uses for the npz sources.
+    """
     common = sorted(set(manual) & set(robometer) & set(robodop))
     rows = []
-    pooled_frames = defaultdict(lambda: defaultdict(list))  # task -> pair -> (x list, y list)
-    total_frames = defaultdict(lambda: ([], []))  # pair -> (x, y)
+    episode_rows = defaultdict(list)  # pair -> [{"task": ..., pearson, kendall_tau_b, mae}, ...]
 
     pair_sources = {
         PAIR_RD_H: (robodop, manual),
@@ -188,46 +197,37 @@ def build_raw_curve_rows(manual: dict, robometer: dict, robodop: dict) -> list:
                     "value": value,
                     "n": n,
                 })
-            pooled_frames[task][pair] = pooled_frames[task].get(pair, ([], []))
-            pooled_frames[task][pair][0].extend(a.tolist())
-            pooled_frames[task][pair][1].extend(b.tolist())
-            total_frames[pair][0].extend(a.tolist())
-            total_frames[pair][1].extend(b.tolist())
+            episode_rows[pair].append({"task": task, **m})
 
-    # task level (pooled frames across all episodes of the task)
-    for task, pairs in pooled_frames.items():
-        n_eps = len({uid for uid in common if manual[uid]["task"] == task})
-        for pair, (xs, ys) in pairs.items():
-            x = np.array(xs)
-            y = np.array(ys)
-            m = compute_all_metrics(x, y)
-            for metric_name, value in m.items():
+    for pair, ep_rows in episode_rows.items():
+        edf = pd.DataFrame(ep_rows)
+
+        task_group = edf.groupby("task", as_index=False)[[METRIC_PEARSON, METRIC_KENDALL, METRIC_MAE]].mean()
+        n_ep_per_task = edf.groupby("task").size().rename("n").reset_index()
+        task_group = task_group.merge(n_ep_per_task, on="task")
+        for _, r in task_group.iterrows():
+            for metric_name in (METRIC_PEARSON, METRIC_KENDALL, METRIC_MAE):
                 rows.append({
                     "level": "task",
-                    "task": task,
-                    "group_id": task,
+                    "task": r["task"],
+                    "group_id": r["task"],
                     "pair": pair,
                     "metric": metric_name,
-                    "value": value,
-                    "n": len(x),
-                    "n_episodes": n_eps,
+                    "value": r[metric_name],
+                    "n": int(r["n"]),
+                    "n_episodes": int(r["n"]),
                 })
 
-    # total level (pooled frames across everything)
-    for pair, (xs, ys) in total_frames.items():
-        x = np.array(xs)
-        y = np.array(ys)
-        m = compute_all_metrics(x, y)
-        for metric_name, value in m.items():
+        for metric_name in (METRIC_PEARSON, METRIC_KENDALL, METRIC_MAE):
             rows.append({
                 "level": "total",
                 "task": "ALL",
                 "group_id": "ALL",
                 "pair": pair,
                 "metric": metric_name,
-                "value": value,
-                "n": len(x),
-                "n_episodes": len(common),
+                "value": float(edf[metric_name].mean()),
+                "n": len(edf),
+                "n_episodes": len(edf),
             })
 
     return rows
