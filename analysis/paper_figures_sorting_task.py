@@ -96,7 +96,7 @@ def ema(x: np.ndarray, alpha: float) -> np.ndarray:
 
 def _get_curves(d) -> tuple[np.ndarray, np.ndarray]:
     """(target, prediction) 0-1 scale, handling icvfe_ema_0.5's signed-only export
-    (see a3_pipeline._traj_metrics_vs_manual for the same fallback)."""
+    (see a3_pipeline._traj_aligned_vs_manual for the same fallback)."""
     if "prediction_progress" in d:
         pred = np.asarray(d["prediction_progress"], dtype=np.float64)
     else:

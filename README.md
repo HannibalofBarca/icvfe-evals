@@ -220,9 +220,10 @@ HF dataset). Value-model ablations (A) are scored against the human (manual)
 progress curves with Pearson r, Kendall tau-b and MAE at episode / task / total
 granularity. Sparse evaluators are aligned by `frame_index` and linearly
 interpolated onto the dense human curve, not zipped by list position.
-Task-, split- and total-level numbers are **episode-averaged**: each episode is
-scored on its own frames, then episode scores are averaged. Frames are never
-pooled across episodes.
+Task-, split- and total-level numbers are **frame-pooled**: every aligned
+(prediction, human) frame from every episode in the group, and for IC-VFE every
+context replicate, goes into one correlation. Episode-level numbers use that
+episode's own frames.
 
 | Script | What it tests | Output |
 |---|---|---|

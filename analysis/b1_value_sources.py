@@ -53,7 +53,7 @@ def _pred_progress(npz) -> np.ndarray:
         return np.asarray(npz["prediction_progress"], dtype=np.float64)
     # icvfe_ema_0.5-style export: only ships the signed "prediction" key
     # (prediction_progress - 1), verified exactly against icvfe_8800 in
-    # a3_pipeline.py's _traj_metrics_vs_manual.
+    # a3_pipeline.py's _traj_aligned_vs_manual.
     return np.asarray(npz["prediction"], dtype=np.float64) + 1.0
 
 

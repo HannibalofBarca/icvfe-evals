@@ -179,22 +179,12 @@ def build_rows(manual: dict, roster: dict) -> list:
     Episodes are restricted to those common to manual and every roster
     source, so all pairs are computed over the same episode set (consistent
     with the study-1 pipeline's rationale for doing the same).
-
-    Nested aggregation throughout: episode level is computed over that
-    episode's own (aligned) frames -- frames within an episode are highly
-    autocorrelated, so this is the smallest unit where pooling raw points is
-    still appropriate. Task/total level average the resulting episode-level
-    numbers instead of pooling frames across episodes -- pooling would treat
-    every frame as an independent observation when the episode, not the
-    frame, is the actual independent sampling unit (longer episodes would
-    otherwise dominate the number just by contributing more non-independent
-    points). This matches the aggregation `a3_pipeline.build_npz_rows`
-    already uses for the npz sources.
     """
     common = sorted(set(manual).intersection(*[set(c) for c in roster.values()]))
 
     rows = []
-    episode_rows = defaultdict(list)  # name -> [{"task": ..., pearson, kendall_tau_b, mae}, ...]
+    pooled_frames = defaultdict(lambda: defaultdict(lambda: ([], [])))  # task -> name -> (x, y)
+    total_frames = defaultdict(lambda: ([], []))  # name -> (x, y)
 
     for uid in common:
         task = manual[uid]["task"]
@@ -218,36 +208,50 @@ def build_rows(manual: dict, roster: dict) -> list:
                     "value": value,
                     "n": n,
                 })
-            episode_rows[name].append({"task": task, **m})
+            xs, ys = pooled_frames[task][name]
+            xs.extend(a.tolist())
+            ys.extend(b.tolist())
+            txs, tys = total_frames[name]
+            txs.extend(a.tolist())
+            tys.extend(b.tolist())
 
-    for name, ep_rows in episode_rows.items():
-        edf = pd.DataFrame(ep_rows)
-        pair = f"{name}_vs_human"
+    n_eps_by_task = defaultdict(int)
+    for uid in common:
+        n_eps_by_task[manual[uid]["task"]] += 1
 
-        task_group = edf.groupby("task", as_index=False)[[METRIC_PEARSON, METRIC_KENDALL, METRIC_MAE]].mean()
-        n_ep_per_task = edf.groupby("task").size().rename("n").reset_index()
-        task_group = task_group.merge(n_ep_per_task, on="task")
-        for _, r in task_group.iterrows():
-            for metric_name in (METRIC_PEARSON, METRIC_KENDALL, METRIC_MAE):
+    for task, names in pooled_frames.items():
+        for name, (xs, ys) in names.items():
+            x = np.array(xs)
+            y = np.array(ys)
+            m = compute_all_metrics(x, y)
+            pair = f"{name}_vs_human"
+            for metric_name, value in m.items():
                 rows.append({
                     "level": "task",
-                    "task": r["task"],
-                    "group_id": r["task"],
+                    "task": task,
+                    "group_id": task,
                     "pair": pair,
                     "metric": metric_name,
-                    "value": r[metric_name],
-                    "n": int(r["n"]),
+                    "value": value,
+                    "n": len(x),
+                    "n_episodes": n_eps_by_task[task],
                 })
 
-        for metric_name in (METRIC_PEARSON, METRIC_KENDALL, METRIC_MAE):
+    for name, (xs, ys) in total_frames.items():
+        x = np.array(xs)
+        y = np.array(ys)
+        m = compute_all_metrics(x, y)
+        pair = f"{name}_vs_human"
+        for metric_name, value in m.items():
             rows.append({
                 "level": "total",
                 "task": "ALL",
                 "group_id": "ALL",
                 "pair": pair,
                 "metric": metric_name,
-                "value": float(edf[metric_name].mean()),
-                "n": len(edf),
+                "value": value,
+                "n": len(x),
+                "n_episodes": len(common),
             })
 
     return rows
@@ -272,34 +276,37 @@ def main():
 
     rows = build_rows(manual, roster)
     long_df = pd.DataFrame(rows)
-    long_df = long_df[["level", "task", "group_id", "pair", "metric", "value", "n"]]
+    long_df = long_df[["level", "task", "group_id", "pair", "metric", "value", "n"] +
+                       (["n_episodes"] if "n_episodes" in long_df.columns else [])]
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     long_path = os.path.join(OUTPUT_DIR, "metrics_long.csv")
     long_df.to_csv(long_path, index=False)
     print(f"Wrote {long_path} ({len(long_df)} rows)")
 
-    def make_wide(level: str, index_cols: list, n_label: str) -> pd.DataFrame:
+    def make_wide(level: str, index_cols: list) -> pd.DataFrame:
         sub = long_df[long_df["level"] == level].copy()
         sub["col"] = sub["pair"] + "__" + sub["metric"]
         wide = sub.pivot_table(index=index_cols, columns="col", values="value", aggfunc="first")
         n_col = sub.groupby(index_cols)["n"].max()
-        wide.insert(0, n_label, n_col)
+        wide.insert(0, "n_frames", n_col)
         wide = wide.reset_index()
         return wide
 
-    # "n" means frame count at episode level, but episode count (the number
-    # of episode-level numbers averaged) at task/total level -- see build_rows.
-    episode_wide = make_wide("episode", ["task", "group_id"], "n_frames").rename(columns={"group_id": "episode_uid"})
+    episode_wide = make_wide("episode", ["task", "group_id"]).rename(columns={"group_id": "episode_uid"})
     episode_wide.to_csv(os.path.join(OUTPUT_DIR, "episode_level_wide.csv"), index=False)
 
-    task_wide = make_wide("task", ["task"], "n_episodes")
+    task_wide = make_wide("task", ["task"])
+    n_ep_map = long_df[long_df["level"] == "task"].groupby("task")["n_episodes"].max()
+    task_wide["n_episodes"] = task_wide["task"].map(n_ep_map)
     task_wide.to_csv(os.path.join(OUTPUT_DIR, "task_level_wide.csv"), index=False)
 
     total_sub = long_df[long_df["level"] == "total"].copy()
     total_wide = total_sub.pivot_table(index="pair", columns="metric", values="value", aggfunc="first")
     n_map = total_sub.groupby("pair")["n"].max()
-    total_wide.insert(0, "n_episodes", n_map)
+    ne_map = total_sub.groupby("pair")["n_episodes"].max()
+    total_wide.insert(0, "n_episodes", ne_map)
+    total_wide.insert(0, "n_frames", n_map)
     total_wide = total_wide.reset_index()
     total_wide.to_csv(os.path.join(OUTPUT_DIR, "total_level_wide.csv"), index=False)
 

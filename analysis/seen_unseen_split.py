@@ -12,18 +12,15 @@ applied uniformly to every OTHER method's rows too (not just RECAP's own),
 on the assumption that "seen"/"unseen" is a property of the task/icl_dataset
 split itself, not of which model happens to report it.
 
-Both source types now use the same nested-aggregation convention (episode
-level over that episode's own frames, then average episode-level numbers --
-see a1_pipeline.build_rows / a3_pipeline.build_npz_rows for the rationale):
+All sources are frame-pooled within each split: every aligned (prediction,
+human) frame from every episode whose task falls in the split is pooled into
+one correlation (see a1_pipeline.build_rows / a3_pipeline.build_npz_rows):
   - "flat" sources (topreward, gvl, robometer_zs, robodopamine_zs,
     robometer_ft, robodopamine_ft, robometer_zs_online, robometer_ft_online):
-    recomputed here
-    from scratch -- per-episode metrics from aligned frames, restricted to
-    episodes whose task falls in the given split, then averaged.
-  - "npz" sources (recap_ft, icvfe_8800, icvfe_ema_0.5): each source's
-    existing episode_level_wide.csv already has per-episode metrics (see
-    a3_pipeline.build_npz_rows), so here we just filter to episodes whose
-    task is in the split and average the metric columns.
+    per-frame JSON curves, aligned by frame_index.
+  - "npz" sources (recap_ft, icvfe_8800, icvfe_ema_0.5): per-trajectory npz
+    predictions, aligned on their own timesteps; every context replicate's
+    frames are pooled.
 
 Usage:
     python seen_unseen_split.py
@@ -32,6 +29,7 @@ from __future__ import annotations
 
 import os
 
+import numpy as np
 import pandas as pd
 
 import a1_pipeline as a1
@@ -76,15 +74,9 @@ assert not (SEEN_TASKS & UNSEEN_TASKS)
 
 
 def flat_split_metrics(manual: dict, curve_set: dict, align_fn, compute_fn) -> dict:
-    """Episode-averaged {split: {pearson, kendall_tau_b, mae, n}} for one evaluator vs. manual.
-
-    Per-episode metrics come from that episode's own aligned frames; the
-    split number is the mean of those episode-level numbers (nested
-    aggregation), not a pool of raw frames across episodes -- see module
-    docstring.
-    """
+    """Frame-pooled {split: {pearson, kendall_tau_b, mae, n}} for one evaluator vs. manual."""
     common = sorted(set(manual) & set(curve_set))
-    episode_rows = {"seen": [], "unseen": []}
+    pooled = {"seen": ([], []), "unseen": ([], [])}
     for uid in common:
         task = manual[uid]["task"]
         split = "seen" if task in SEEN_TASKS else "unseen" if task in UNSEEN_TASKS else None
@@ -92,32 +84,35 @@ def flat_split_metrics(manual: dict, curve_set: dict, align_fn, compute_fn) -> d
             continue
         a_arr, b_arr = align_fn(curve_set[uid], manual[uid])
         a_arr, b_arr = a_arr / 100.0, b_arr / 100.0
-        episode_rows[split].append(compute_fn(a_arr, b_arr))
+        xs, ys = pooled[split]
+        xs.extend(a_arr.tolist())
+        ys.extend(b_arr.tolist())
     out = {}
-    for split, metrics_list in episode_rows.items():
-        edf = pd.DataFrame(metrics_list)
-        out[split] = {
-            "pearson": float(edf["pearson"].mean()) if len(edf) else float("nan"),
-            "kendall_tau_b": float(edf["kendall_tau_b"].mean()) if len(edf) else float("nan"),
-            "mae": float(edf["mae"].mean()) if len(edf) else float("nan"),
-            "n": len(edf),
-        }
+    for split, (xs, ys) in pooled.items():
+        m = compute_fn(np.array(xs), np.array(ys))
+        m["n"] = len(xs)
+        out[split] = m
     return out
 
 
-def npz_split_metrics(episode_wide_path: str, col_prefix: str) -> dict:
-    """Episode-averaged {split: {pearson, kendall_tau_b, mae, n}}, from an existing episode_level_wide.csv."""
-    df = pd.read_csv(episode_wide_path)
+def npz_split_metrics(manual: dict, name: str) -> dict:
+    """Frame-pooled {split: {pearson, kendall_tau_b, mae, n}} over every replicate of an npz source."""
+    pooled = {"seen": ([], []), "unseen": ([], [])}
+    for t in a3.NPZ_LOADERS[name](name):
+        split = "seen" if t["task"] in SEEN_TASKS else "unseen" if t["task"] in UNSEEN_TASKS else None
+        if split is None:
+            continue
+        aligned = a3._traj_aligned_vs_manual(t["npz_path"], manual, t["episode_uid"])
+        if aligned is None:
+            continue
+        xs, ys = pooled[split]
+        xs.extend(aligned[0].tolist())
+        ys.extend(aligned[1].tolist())
     out = {}
-    for split, tasks in (("seen", SEEN_TASKS), ("unseen", UNSEEN_TASKS)):
-        sub = df[df["task"].isin(tasks)]
-        sub = sub.dropna(subset=[f"{col_prefix}__pearson"])
-        out[split] = {
-            "pearson": float(sub[f"{col_prefix}__pearson"].mean()),
-            "kendall_tau_b": float(sub[f"{col_prefix}__kendall_tau_b"].mean()),
-            "mae": float(sub[f"{col_prefix}__mae"].mean()),
-            "n": len(sub),
-        }
+    for split, (xs, ys) in pooled.items():
+        m = a3.compute_all_metrics(np.array(xs), np.array(ys))
+        m["n"] = len(xs)
+        out[split] = m
     return out
 
 
@@ -152,10 +147,9 @@ def main():
         for s, m in split.items():
             rows.append({"section": "A3", "method": name, "split": s, **m})
 
-    # -- A3 npz sources (recap_ft, icvfe_8800, icvfe_ema_0.5) -- reuse existing episode_level_wide.csv
-    episode_wide_path = os.path.join(HERE, "output", "A3-online ft models vs human", "episode_level_wide.csv")
-    for name in ("recap_ft", "icvfe_8800", "icvfe_ema_0.5"):
-        split = npz_split_metrics(episode_wide_path, f"{name}_vs_human")
+    # -- A3 npz sources (recap_ft, icvfe_8800, icvfe_ema_0.5) --
+    for name in a3.NPZ_ROSTER:
+        split = npz_split_metrics(manual_a3, name)
         for s, m in split.items():
             rows.append({"section": "A3", "method": name, "split": s, **m})
 
