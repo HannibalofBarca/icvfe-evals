@@ -52,8 +52,8 @@ Some archives are hosted in sibling datasets; the HF dataset card lists where to
 |---|---|---|
 | Robo-Dopamine (zero-shot) | [tanhuajie2001/Robo-Dopamine-GRM-2.0-4B-Preview](https://huggingface.co/tanhuajie2001/Robo-Dopamine-GRM-2.0-4B-Preview) | [HannibalofBarca/Robo-Dopamine](https://github.com/HannibalofBarca/Robo-Dopamine) |
 | Robo-Dopamine (fine-tuned) | Per-task LoRAs: [Hannibal52Barca/robo-dopamine-lora-checkpoints](https://huggingface.co/Hannibal52Barca/robo-dopamine-lora-checkpoints) | [HannibalofBarca/Robo-Dopamine](https://github.com/HannibalofBarca/Robo-Dopamine) |
-| RoboMeter (zero-shot, incl. online) | [robometer/Robometer-4B](https://huggingface.co/robometer/Robometer-4B) | [robometer/robometer](https://github.com/robometer/robometer) |
-| RoboMeter (fine-tuned, incl. online) | [Hannibal52Barca/robometer-4b-icl-finetuned](https://huggingface.co/Hannibal52Barca/robometer-4b-icl-finetuned) | [robometer/robometer](https://github.com/robometer/robometer) |
+| RoboMeter (zero-shot, incl. online) | [lerobot/Robometer-4B](https://huggingface.co/lerobot/Robometer-4B) | [huggingface/lerobot](https://github.com/huggingface/lerobot) (`lerobot.rewards.robometer`) |
+| RoboMeter (fine-tuned, incl. online) | [Hannibal52Barca/robometer-4b-icl-finetuned](https://huggingface.co/Hannibal52Barca/robometer-4b-icl-finetuned) | [HannibalofBarca/robometer@icl-finetune](https://github.com/HannibalofBarca/robometer/tree/icl-finetune) |
 | TOPReward (zero-shot) | [Qwen/Qwen3-VL-8B-Instruct](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct) | [huggingface/lerobot](https://github.com/huggingface/lerobot) (`lerobot.rewards.topreward`) |
 | GVL (zero-shot) | GPT-4o (OpenAI API) | [robometer/robometer](https://github.com/robometer/robometer) (`robometer/evals/baselines/gvl.py`) |
 | DINO\* | [facebook/dinov2-base](https://huggingface.co/facebook/dinov2-base) | – |
