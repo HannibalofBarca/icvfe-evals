@@ -39,6 +39,26 @@ B1/B2 retrieval.
 
 Some archives are hosted in sibling datasets; the HF dataset card lists where to place them.
 
+## Links
+
+**Data**
+- Source episodes: [adityx23/icl-demo-dataset](https://huggingface.co/datasets/adityx23/icl-demo-dataset)
+- Model predictions and analysis outputs: [Hannibal52Barca/icl-vfe-eval-results](https://huggingface.co/datasets/Hannibal52Barca/icl-vfe-eval-results)
+- Human annotations: [Hannibal52Barca/icl_project_manual_annotation](https://huggingface.co/datasets/Hannibal52Barca/icl_project_manual_annotation) (tool: [icl-manual-annotation](https://github.com/HannibalofBarca/icl-manual-annotation))
+
+**Models**
+
+| Method | Weights | Code |
+|---|---|---|
+| Robo-Dopamine (zero-shot) | [tanhuajie2001/Robo-Dopamine-GRM-2.0-4B-Preview](https://huggingface.co/tanhuajie2001/Robo-Dopamine-GRM-2.0-4B-Preview) | [HannibalofBarca/Robo-Dopamine](https://github.com/HannibalofBarca/Robo-Dopamine) |
+| Robo-Dopamine (fine-tuned) | Per-task LoRAs: [Hannibal52Barca/robo-dopamine-lora-checkpoints](https://huggingface.co/Hannibal52Barca/robo-dopamine-lora-checkpoints) | [HannibalofBarca/Robo-Dopamine](https://github.com/HannibalofBarca/Robo-Dopamine) |
+| RoboMeter (zero-shot, incl. online) | [robometer/Robometer-4B](https://huggingface.co/robometer/Robometer-4B) | [robometer/robometer](https://github.com/robometer/robometer) |
+| RoboMeter (fine-tuned, incl. online) | [Hannibal52Barca/robometer-4b-icl-finetuned](https://huggingface.co/Hannibal52Barca/robometer-4b-icl-finetuned) | [robometer/robometer](https://github.com/robometer/robometer) |
+| TOPReward (zero-shot) | [Qwen/Qwen3-VL-8B-Instruct](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct) | [huggingface/lerobot](https://github.com/huggingface/lerobot) (`lerobot.rewards.topreward`) |
+| GVL (zero-shot) | GPT-4o (OpenAI API) | [robometer/robometer](https://github.com/robometer/robometer) (`robometer/evals/baselines/gvl.py`) |
+| DINO\* | [facebook/dinov2-base](https://huggingface.co/facebook/dinov2-base) | – |
+| IC-VFE, RECAP | Not yet released | – |
+
 ## Scoring
 
 - **Metrics:** Pearson r, Kendall τ-b, MAE (progress on a 0–1 scale), each vs. the human curve.
