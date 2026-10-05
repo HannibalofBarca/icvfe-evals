@@ -4,7 +4,7 @@ B1/B2 retrieval metrics pipeline (TTC, videoDTW, BC error, naive DINO error).
 This module implements the four metric functions per user direction, decoupled
 from any particular retrieval method -- each takes a (query episode/frame,
 retrieved episode/frame) pair and returns an error value. Actual retrieval
-methods (DINO nearest-neighbor, RoboMeter-guided, VEP, etc. -- B1's roster)
+methods (DINO nearest-neighbor, RoboMeter-guided, etc. -- B1's roster)
 are a separate, later step; this is metrics-only infrastructure so they can be
 plugged in once decided.
 
@@ -76,10 +76,6 @@ CACHE_DIR = os.path.join(HERE, "cache", "b_metrics")
 DINO_ARCHIVE = os.path.normpath(
     os.path.join(HERE, "..", "..", "Reward Based Retrieval", "dino_embeddings_demo.zip")
 )
-VEP_ARCHIVE = os.path.normpath(
-    os.path.join(HERE, "..", "data", "demo_set_annotations", "demo_set_annotations",
-                 "vep", "vep_icl_demo_dataset_embeddings.zip")
-)
 ACTION_DATA_ROOT = os.path.normpath(
     os.path.join(HERE, "..", "..", "obs_fix", "output", "icl-demo-dataset-fixed-action")
 )
@@ -107,8 +103,8 @@ def _extract_dino_archive() -> str:
 class EmbeddingIndex:
     """episode_uid -> sorted (frames, embeddings) for nearest-frame lookup.
 
-    Base class shared by DinoIndex and VepIndex -- both are sparse
-    (every-10th-frame + tail), per-episode embedding sets, differing only in
+    Base class for DinoIndex -- a sparse
+    (every-10th-frame + tail), per-episode embedding set; subclasses differ only in
     where/how they're loaded from disk. Subclasses populate self._frames /
     self._embeddings in __init__.
     """
@@ -154,41 +150,6 @@ class DinoIndex(EmbeddingIndex):
             order = np.argsort(frames)
             self._frames[uid] = frames[order]
             self._embeddings[uid] = emb[order]
-
-
-def _extract_vep_archive() -> str:
-    dest = os.path.join(CACHE_DIR, "vep_icl_demo_dataset_embeddings")
-    if not (os.path.isdir(dest) and os.listdir(dest)):
-        os.makedirs(dest, exist_ok=True)
-        with zipfile.ZipFile(VEP_ARCHIVE) as zf:
-            zf.extractall(dest)
-    entries = [e for e in os.listdir(dest) if os.path.isdir(os.path.join(dest, e))]
-    return os.path.join(dest, entries[0]) if len(entries) == 1 else dest
-
-
-class VepIndex(EmbeddingIndex):
-    """VEP embeddings (128-dim), one .npz per EPISODE (frame_index every-10th + tail, like DINO)."""
-
-    def __init__(self):
-        root = _extract_vep_archive()
-        self._frames: dict[str, np.ndarray] = {}
-        self._embeddings: dict[str, np.ndarray] = {}
-        for fname in os.listdir(root):
-            if not fname.endswith(".npz"):
-                continue
-            with np.load(os.path.join(root, fname), allow_pickle=True) as d:
-                uid = str(d["episode_uid"])
-                frames, emb = d["frame_index"], d["embeddings"]
-                order = np.argsort(frames)
-                self._frames[uid] = frames[order]
-                self._embeddings[uid] = emb[order]
-
-
-# --------------------------------------------------------------------------
-# Raw actions + episode lengths
-# --------------------------------------------------------------------------
-
-_EPISODES_META_CACHE: list[dict] | None = None
 
 
 def _episodes_meta() -> list[dict]:
@@ -278,7 +239,7 @@ def ttc_error(query_uid: str, query_frame: int, retrieved_uid: str, retrieved_fr
 def video_chunk_error(embeddings: EmbeddingIndex, query_uid: str, query_frame: int,
                        retrieved_uid: str, retrieved_frame: int, horizon: int = CHUNK_HORIZON) -> float:
     """Mean absolute error (L1) between the retrieved and reference frame-embedding
-    chunks -- same formulation as bc_error, pass a DinoIndex or VepIndex. No DTW
+    chunks -- same formulation as bc_error, pass a DinoIndex. No DTW
     alignment: both chunks are the same fixed horizon anchored at a known frame
     correspondence. Chunks are truncated to the shorter length if either runs
     past its episode's end."""
@@ -308,7 +269,7 @@ def bc_error(query_uid: str, query_frame: int, retrieved_uid: str, retrieved_fra
 
 def naive_dino_error(embeddings: EmbeddingIndex, query_uid: str, query_frame: int,
                       retrieved_uid: str, retrieved_frame: int) -> float:
-    """Single-frame embedding distance -- pass a DinoIndex or VepIndex (naming kept for backward compat)."""
+    """Single-frame embedding distance -- pass a DinoIndex (naming kept for backward compat)."""
     query_emb = embeddings.interp(query_uid, query_frame)
     retrieved_emb = embeddings.interp(retrieved_uid, retrieved_frame)
     return float(np.linalg.norm(query_emb - retrieved_emb))

@@ -211,6 +211,42 @@ delete the specific stale subdir (`rm -rf analysis/cache/manual`) or run
 `python pipeline.py --no-cache` to force a full re-extraction, then re-run
 the rest of the chain.
 
+## Ablations (A1–A3) and retrieval evals (B1–B2)
+
+All five read archives from `data/demo_set_annotations/demo_set_annotations/`
+(download from the
+[icl-vfe-eval-results](https://huggingface.co/datasets/Hannibal52Barca/icl-vfe-eval-results)
+HF dataset). Value-model ablations (A) are scored against the human (manual)
+progress curves with Pearson r, Kendall tau-b and MAE at episode / task / total
+granularity. Sparse evaluators are aligned by `frame_index` and linearly
+interpolated onto the dense human curve, not zipped by list position.
+
+| Script | What it tests | Output |
+|---|---|---|
+| `analysis/a1_pipeline.py` | **A1 — reward model roster.** Zero-shot TOPReward, GVL, RoboMeter and RoboDopamine vs. human. The only place TOPReward and GVL are scored. | `output/A1-reward model ablation/` |
+| `analysis/a2_pipeline.py` | **A2 — fine-tuned vs. zero-shot.** RoboMeter FT vs. ZS and RoboDopamine FT vs. ZS (non-online exports), i.e. whether in-domain adaptation helps each family. | `output/A2-finetuned vs zeroshot/` |
+| `analysis/a3_pipeline.py` | **A3 — online-eligible models vs. human.** RoboMeter FT (online), RECAP and IC-VFE (step 8800, plus causal-EMA α=0.5), i.e. the models usable at rollout time without full-episode/goal context. | `output/A3-online ft models vs human/` |
+| `analysis/b1_full_run.py` (+ `b1_retrieval.py`, `b1_full_run_{tasklist,shard,merge}.py` for sharded runs) | **B1 — retrieval methods.** Per task, a fixed demo-bank episode (lowest `episode_index`) is searched for the chunk that best matches every frame of every other episode, by value (RoboMeter FT online, RECAP, IC-VFE, IC-VFE EMA; RoboDopamine ZS as an upper-bound reference), by DINO visual distance, and by a naive unweighted value + vision sum. | `output/b1_full_run/` |
+| `analysis/b2_lambda_sweep.py` | **B2 — vision/value mixing weight.** Retrieval score `λ·value_dist + (1−λ)·vision_dist` for λ ∈ {0, 0.25, 0.5, 0.75, 1} over the B1 online-eligible value sources (no RoboDopamine). | `output/B2-vision value lambda sweep/`, `output/B2-lambda sweep summary/` |
+
+B1/B2 retrieval quality is measured with the metric functions in
+`analysis/b_metrics.py`. **TTC error** is the difference in normalized
+time-to-completion between query and retrieved frame. **videoDTW error** is
+the path-normalized DTW distance between the 30-frame DINO chunks.
+**BC error** is the mean L1 distance between the two 30-step raw action chunks, and **DINO error** is the
+single-frame embedding distance.
+
+`analysis/seen_unseen_split.py` re-splits every A-series method's total-level
+metrics into seen (15) vs. unseen (12) tasks, using RECAP's own fine-tuning
+split. It writes `output/seen-unseen split/`, which feeds `vfe_results_table.tex`.
+
+```
+cd analysis
+python a1_pipeline.py && python a2_pipeline.py && python a3_pipeline.py
+python b1_full_run.py && python b2_lambda_sweep.py
+python seen_unseen_split.py
+```
+
 ## Graphs (`analysis/plotting.py`, `analysis/build_report.py`)
 
 Plain matplotlib PNGs, matched to what each granularity can actually show:

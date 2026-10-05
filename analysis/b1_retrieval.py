@@ -21,10 +21,9 @@ Retrieval methods (per user direction):
      in this repo. (ICVFE FT-only is deferred -- its in-context format needs
      picking/averaging over context replicates to get an intrinsic value
      curve for ep1, which is extra plumbing; flagging rather than guessing.)
-  2. VEP -- excluded per user direction, may be added later.
-  3. vision-based: retrieve the ep1 candidate whose DINO embedding at its
+  2. vision-based: retrieve the ep1 candidate whose DINO embedding at its
      start frame is closest (Euclidean) to the query frame's DINO embedding.
-  4. naive vision+value: retrieve the candidate minimizing the *unweighted
+  3. naive vision+value: retrieve the candidate minimizing the *unweighted
      sum* of the raw value error and the raw DINO distance -- "naive"
      literally, no rescaling to a common range (per doc: "simple average").
 
