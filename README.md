@@ -19,11 +19,14 @@ Everything lives under `data/demo_set_annotations/demo_set_annotations/`:
 | Method | Model | Type |
 |---|---|---|
 | Manual | Human annotation (reference) | – |
-| Robo-Dopamine | Robo-Dopamine GRM, zero-shot / fine-tuned | Offline |
-| RoboMeter | RoboMeter-4B, zero-shot / fine-tuned | Offline |
-| TOPReward | TOPReward, zero-shot | Offline |
-| GVL | GVL, zero-shot | Offline |
-| RoboMeter (online) | RoboMeter-4B online, zero-shot / fine-tuned | Online |
+| Robo-Dopamine (zero-shot) | Robo-Dopamine GRM | Offline |
+| Robo-Dopamine (fine-tuned) | Robo-Dopamine GRM | Offline |
+| RoboMeter (zero-shot) | RoboMeter-4B | Offline |
+| RoboMeter (fine-tuned) | RoboMeter-4B | Offline |
+| TOPReward (zero-shot) | TOPReward | Offline |
+| GVL (zero-shot) | GVL | Offline |
+| RoboMeter online (zero-shot) | RoboMeter-4B | Online |
+| RoboMeter online (fine-tuned) | RoboMeter-4B | Online |
 | RECAP | π0.6 RECAP-style VFE, step 20000 (no context) | Online |
 | IC-VFE | IC-VFE step 8800, raw / causal EMA α=0.5 | Online |
 | DINO\* | DINOv2 embeddings | – |
