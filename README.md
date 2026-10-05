@@ -238,7 +238,7 @@ single-frame embedding distance.
 
 `analysis/seen_unseen_split.py` re-splits every A-series method's total-level
 metrics into seen (15) vs. unseen (12) tasks, using RECAP's own fine-tuning
-split. It writes `output/seen-unseen split/`, which feeds `vfe_results_table.tex`.
+split. It writes `output/seen-unseen split/`.
 
 ```
 cd analysis

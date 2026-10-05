@@ -4,3 +4,4 @@ analysis/output/
 **/__pycache__/
 *.pyc
 analysis/b1_vep_retrieval.py
+*.tex
