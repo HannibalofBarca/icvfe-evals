@@ -66,7 +66,7 @@ elapsed time (e.g. TOPReward). Seen-task Kendall τ-b / Pearson r:
 | GVL | 0.20 / 0.25 | 0.35 / 0.43 |
 | RoboMeter FT (online) | 0.15 / 0.30 | 0.32 / 0.45 |
 | RECAP | 0.37 / 0.50 | 0.48 / 0.61 |
-| IC-VFE | 0.36 / 0.50 | 0.53 / 0.65 |
+| IC-VFE | 0.35 / 0.49 | 0.51 / 0.63 |
 
 Compare models only within one aggregation scheme.
 
