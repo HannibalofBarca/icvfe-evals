@@ -152,6 +152,13 @@ class DinoIndex(EmbeddingIndex):
             self._embeddings[uid] = emb[order]
 
 
+# --------------------------------------------------------------------------
+# Raw actions + episode lengths
+# --------------------------------------------------------------------------
+
+_EPISODES_META_CACHE: list[dict] | None = None
+
+
 def _episodes_meta() -> list[dict]:
     global _EPISODES_META_CACHE
     if _EPISODES_META_CACHE is None:
