@@ -4,7 +4,7 @@ B2: lambda sweep on the vision-value retrieval mixture.
 Per Eval_Research_Summary.md's ablation table:
   variants: lambda in {0, 0.25, 0.5, 0.75, 1.0} over the same online-eligible
             pool from B1 (no RoboDopamine)
-  metrics:  videoDTW error, TTC, DINO error, BC error on the retrieved chunk
+  metrics:  video chunk error, TTC, DINO error, BC error on the retrieved chunk
   goal:     "find the best mixing weight" -- same metric suite as B1, applied
             across the sweep
 

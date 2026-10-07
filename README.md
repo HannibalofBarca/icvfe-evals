@@ -114,14 +114,25 @@ Requires `numpy`, `pandas`, `scipy`, `matplotlib`. Archives are extracted into
 `analysis/cache/` on first run. Delete the relevant subdirectory (or pass `--no-cache`)
 after replacing an archive.
 
-## Other tools
+## Additional functionalities
 
+Not used in the reported results.
+
+**Extra B1 metrics and retrieval methods**
+- **Video chunk error** (formerly "videoDTW"): L1 distance between the retrieved and
+  query 10-frame DINO-embedding chunks.
+- **BC error:** L1 distance between the retrieved and query action chunks.
+- `b1_vep_retrieval.py`: B1 retrieval by VEP embedding nearest neighbor instead of DINO
+  (`b_metrics.VepIndex`), output in `b1_vep_retrieval/`.
+
+`b_metrics.py` computes both extra metrics, and `b1_full_run.py` / `b2_lambda_sweep.py`
+still write them as the `video_chunk_error` and `bc_error` columns.
+
+**Scripts**
+- `b2_lambda_sweep.py`: B2, a sweep of the value/vision mixing weight λ in B1 retrieval
+  (`λ·value_dist + (1−λ)·vision_dist`).
+- `rescore_vfe_paper_ablation.py`: CPU rescoring of saved IC-VFE ablation predictions.
 - `analysis/pipeline.py`, `plotting.py`, `build_report.py`, `baseline_reports.py`,
   `progress_curves.py`: earlier pairwise study (Robo-Dopamine / RoboMeter / IC-VFE /
   RECAP vs. human and vs. Robo-Dopamine) with figures and per-episode curve plots.
-- `rescore_vfe_paper_ablation.py`: CPU rescoring of saved IC-VFE ablation predictions.
-- `b2_lambda_sweep.py`: B2, a sweep of the value/vision mixing weight λ in B1 retrieval
-  (`λ·value_dist + (1−λ)·vision_dist`).
-- `b_metrics.py` also computes **videoDTW error** (DTW distance between 30-frame DINO
-  chunks) and **BC error** (L1 distance between the retrieved and query action chunks).
 - `visualizer/`: local web app to overlay one episode's curves (`python visualizer/server.py`).

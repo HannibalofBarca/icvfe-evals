@@ -1,12 +1,13 @@
 """
-B1/B2 retrieval metrics pipeline (TTC, videoDTW, BC error, naive DINO error).
+B1/B2 retrieval metrics (TTC, video chunk error, BC error, naive DINO error).
 
-This module implements the four metric functions per user direction, decoupled
-from any particular retrieval method -- each takes a (query episode/frame,
-retrieved episode/frame) pair and returns an error value. Actual retrieval
-methods (DINO nearest-neighbor, RoboMeter-guided, etc. -- B1's roster)
-are a separate, later step; this is metrics-only infrastructure so they can be
-plugged in once decided.
+Core metrics are 1 (TTC error) and 4 (naive DINO error). Metrics 2 and 3 (video
+chunk error, BC error) and VepIndex are additional functionality: still
+computed into the B1/B2 outputs, but not used in the reported results.
+
+Each metric takes a (query episode/frame, retrieved episode/frame) pair and
+returns an error value, independent of the retrieval method that produced the
+pair (b1_full_run.py, b2_lambda_sweep.py).
 
 Metric definitions (as given, superseding the DRAQ-based ratio-vs-random
 framing in Eval_Research_Summary.md's "Metrics To Calculate" table):
@@ -19,26 +20,24 @@ framing in Eval_Research_Summary.md's "Metrics To Calculate" table):
    evaluate" -- i.e. this is an eval-only metric, using each episode's known
    total length after the fact.
 
-2. videoDTW error -- path-normalized DTW distance (per the doc's existing
-   videoDTW definition) between two 30-frame DINO-embedding sequences: the
-   "current chunk" (query_frame, query_frame+1, ..., query_frame+29) and the
-   "retrieved chunk" (same window anchored at retrieved_frame in the
-   retrieved episode).
+2. [additional] Video chunk error (formerly "videoDTW") -- mean absolute error (L1) between
+   two CHUNK_HORIZON-frame DINO-embedding sequences: the "current chunk"
+   (query_frame, ..., query_frame+CHUNK_HORIZON-1) and the "retrieved chunk"
+   (same window anchored at retrieved_frame in the retrieved episode). L1
+   rather than DTW because both chunks are the same fixed horizon anchored at
+   a known frame correspondence -- no warping needed.
 
-3. BC error -- identical windowing to videoDTW, but a direct mean absolute
-   error (L1) over raw action vectors instead of DINO embeddings
+3. [additional] BC error -- identical windowing and L1 formulation to the video chunk
+   error, over raw action vectors instead of DINO embeddings
    (action.q_target + action.gripper + action.base_vel + action.lift_cmd,
    concatenated in a fixed, self-consistent order -- order doesn't need to
    match the FAST tokenizer's training convention here, since this is a raw
-   continuous-space distance, not tokenization). L1 rather than DTW because
-   both chunks are the same fixed horizon anchored at a known frame
-   correspondence -- no warping needed -- matching the standard
-   action-chunking behavior-cloning loss (e.g. ACT, Zhao et al. 2023) rather
-   than this project's earlier (superseded) DTW formulation.
+   continuous-space distance, not tokenization). Matches the standard
+   action-chunking behavior-cloning loss (e.g. ACT, Zhao et al. 2023).
 
 4. naive DINO error -- single-frame embedding distance between the query
    frame's DINO embedding and the retrieved chunk's *first* frame (i.e.
-   DINO(query_frame) vs DINO(retrieved_frame), no sequence/DTW involved).
+   DINO(query_frame) vs DINO(retrieved_frame), no sequence involved).
 
 Data sources:
   - DINO embeddings: ../../Reward Based Retrieval/dino_embeddings_demo.zip
@@ -52,12 +51,11 @@ Frame lookup for sparse DINO embeddings uses per-dimension linear
 interpolation between the two bracketing sampled frames, not nearest. With a
 10-frame chunk horizon and embeddings sampled every 10 frames, a chunk
 typically brackets only one native sample -- nearest-frame lookup would
-collapse most chunks into a near-constant repeated vector, giving DTW almost
-no signal. Interpolation instead produces a smoothly-varying 10-point
+collapse most chunks into a near-constant repeated vector, giving the video
+chunk error almost no signal. Interpolation instead produces a smoothly-varying 10-point
 sequence over the same single 10-frame gap the samples were taken at, which
 is a reasonable local approximation despite the embedding manifold being
-non-linear in general. This, the Euclidean local-cost function for DTW, and
-the action-column concatenation order are all flagged as revisitable design
+non-linear in general. This and the action-column concatenation order are all flagged as revisitable design
 choices once we discuss methods -- everything here is internally consistent
 but none of it has been validated against a reference implementation.
 """
@@ -75,6 +73,10 @@ CACHE_DIR = os.path.join(HERE, "cache", "b_metrics")
 
 DINO_ARCHIVE = os.path.normpath(
     os.path.join(HERE, "..", "..", "Reward Based Retrieval", "dino_embeddings_demo.zip")
+)
+VEP_ARCHIVE = os.path.normpath(
+    os.path.join(HERE, "..", "data", "demo_set_annotations", "demo_set_annotations",
+                 "vep", "vep_icl_demo_dataset_embeddings.zip")
 )
 ACTION_DATA_ROOT = os.path.normpath(
     os.path.join(HERE, "..", "..", "obs_fix", "output", "icl-demo-dataset-fixed-action")
@@ -103,10 +105,8 @@ def _extract_dino_archive() -> str:
 class EmbeddingIndex:
     """episode_uid -> sorted (frames, embeddings) for nearest-frame lookup.
 
-    Base class for DinoIndex -- a sparse
-    (every-10th-frame + tail), per-episode embedding set; subclasses differ only in
-    where/how they're loaded from disk. Subclasses populate self._frames /
-    self._embeddings in __init__.
+    Base class for sparse (every-10th-frame + tail) per-episode embedding sets.
+    Subclasses populate self._frames / self._embeddings in __init__.
     """
 
     def interp(self, episode_uid: str, frame: int) -> np.ndarray:
@@ -150,6 +150,37 @@ class DinoIndex(EmbeddingIndex):
             order = np.argsort(frames)
             self._frames[uid] = frames[order]
             self._embeddings[uid] = emb[order]
+
+# --------------------------------------------------------------------------
+# [additional] VEP embeddings -- used only by b1_vep_retrieval.py
+# --------------------------------------------------------------------------
+
+def _extract_vep_archive() -> str:
+    dest = os.path.join(CACHE_DIR, "vep_icl_demo_dataset_embeddings")
+    if not (os.path.isdir(dest) and os.listdir(dest)):
+        os.makedirs(dest, exist_ok=True)
+        with zipfile.ZipFile(VEP_ARCHIVE) as zf:
+            zf.extractall(dest)
+    entries = [e for e in os.listdir(dest) if os.path.isdir(os.path.join(dest, e))]
+    return os.path.join(dest, entries[0]) if len(entries) == 1 else dest
+
+
+class VepIndex(EmbeddingIndex):
+    """VEP embeddings (128-dim), one .npz per EPISODE (frame_index every-10th + tail, like DINO)."""
+
+    def __init__(self):
+        root = _extract_vep_archive()
+        self._frames: dict[str, np.ndarray] = {}
+        self._embeddings: dict[str, np.ndarray] = {}
+        for fname in os.listdir(root):
+            if not fname.endswith(".npz"):
+                continue
+            with np.load(os.path.join(root, fname), allow_pickle=True) as d:
+                uid = str(d["episode_uid"])
+                frames, emb = d["frame_index"], d["embeddings"]
+                order = np.argsort(frames)
+                self._frames[uid] = frames[order]
+                self._embeddings[uid] = emb[order]
 
 
 # --------------------------------------------------------------------------
@@ -206,34 +237,6 @@ def action_sequence(episode_uid: str, start_frame: int, horizon: int = CHUNK_HOR
 
 
 # --------------------------------------------------------------------------
-# DTW (path-normalized), per Eval_Research_Summary.md's videoDTW definition
-# --------------------------------------------------------------------------
-
-def dtw_path_normalized(seq_a: np.ndarray, seq_b: np.ndarray) -> float:
-    """
-    gamma(i,j) = d(a_i,b_j) + min(gamma(i-1,j), gamma(i,j-1), gamma(i-1,j-1))
-    boundary: gamma(0,0)=0; gamma(i,0)=gamma(0,j)=inf for i,j>0
-    returns gamma(n,m) / |path|  (path length = n + m - 1 for a full DTW alignment)
-    """
-    n, m = len(seq_a), len(seq_b)
-    if n == 0 or m == 0:
-        return float("nan")
-
-    # local Euclidean cost matrix
-    diff = seq_a[:, None, :] - seq_b[None, :, :]
-    cost = np.sqrt(np.sum(diff * diff, axis=-1))
-
-    gamma = np.full((n + 1, m + 1), np.inf)
-    gamma[0, 0] = 0.0
-    for i in range(1, n + 1):
-        for j in range(1, m + 1):
-            gamma[i, j] = cost[i - 1, j - 1] + min(gamma[i - 1, j], gamma[i, j - 1], gamma[i - 1, j - 1])
-
-    path_length = n + m - 1  # length of the shortest-possible monotone alignment path
-    return float(gamma[n, m] / path_length)
-
-
-# --------------------------------------------------------------------------
 # The four metrics
 # --------------------------------------------------------------------------
 
@@ -246,7 +249,7 @@ def ttc_error(query_uid: str, query_frame: int, retrieved_uid: str, retrieved_fr
 def video_chunk_error(embeddings: EmbeddingIndex, query_uid: str, query_frame: int,
                        retrieved_uid: str, retrieved_frame: int, horizon: int = CHUNK_HORIZON) -> float:
     """Mean absolute error (L1) between the retrieved and reference frame-embedding
-    chunks -- same formulation as bc_error, pass a DinoIndex. No DTW
+    chunks -- same formulation as bc_error, pass a DinoIndex or VepIndex. No DTW
     alignment: both chunks are the same fixed horizon anchored at a known frame
     correspondence. Chunks are truncated to the shorter length if either runs
     past its episode's end."""
@@ -276,7 +279,7 @@ def bc_error(query_uid: str, query_frame: int, retrieved_uid: str, retrieved_fra
 
 def naive_dino_error(embeddings: EmbeddingIndex, query_uid: str, query_frame: int,
                       retrieved_uid: str, retrieved_frame: int) -> float:
-    """Single-frame embedding distance -- pass a DinoIndex (naming kept for backward compat)."""
+    """Single-frame embedding distance -- pass a DinoIndex or VepIndex (naming kept for backward compat)."""
     query_emb = embeddings.interp(query_uid, query_frame)
     retrieved_emb = embeddings.interp(retrieved_uid, retrieved_frame)
     return float(np.linalg.norm(query_emb - retrieved_emb))

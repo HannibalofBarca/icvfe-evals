@@ -27,7 +27,6 @@ skipped one at a time rather than dropping the whole task.
 """
 from __future__ import annotations
 
-import os
 from collections import defaultdict
 
 import numpy as np

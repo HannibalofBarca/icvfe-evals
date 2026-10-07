@@ -45,7 +45,6 @@ def fmt_table(df: pd.DataFrame) -> str:
 def build():
     total_wide = pd.read_csv(os.path.join(OUT_DIR, "total_level_wide.csv"))
     task_wide = pd.read_csv(os.path.join(OUT_DIR, "task_level_wide.csv"))
-    episode_wide = pd.read_csv(os.path.join(OUT_DIR, "episode_level_wide.csv"))
 
     # ---- total-level summary table ----
     total_rows = []
