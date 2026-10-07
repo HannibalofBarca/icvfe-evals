@@ -124,14 +124,18 @@ def load_curve_set(cache_subdir: str) -> dict:
 # --------------------------------------------------------------------------
 
 def safe_pearson(x: np.ndarray, y: np.ndarray) -> float:
+    # Undefined for a constant (or single-frame) curve; scored 0 rather than NaN
+    # so these episodes count instead of being skipped (matches evaluate_ref._corr).
     if len(x) < 2 or np.std(x) == 0 or np.std(y) == 0:
-        return float("nan")
+        return 0.0
     return float(pearsonr(x, y)[0])
 
 
 def safe_kendall(x: np.ndarray, y: np.ndarray) -> float:
+    # Undefined for a constant (or single-frame) curve; scored 0 rather than NaN
+    # so these episodes count instead of being skipped (matches evaluate_ref._corr).
     if len(x) < 2 or np.std(x) == 0 or np.std(y) == 0:
-        return float("nan")
+        return 0.0
     return float(kendalltau(x, y, variant="b")[0])
 
 

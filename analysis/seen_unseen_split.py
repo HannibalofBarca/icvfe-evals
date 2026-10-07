@@ -12,15 +12,16 @@ applied uniformly to every OTHER method's rows too (not just RECAP's own),
 on the assumption that "seen"/"unseen" is a property of the task/icl_dataset
 split itself, not of which model happens to report it.
 
-All sources are frame-pooled within each split: every aligned (prediction,
-human) frame from every episode whose task falls in the split is pooled into
-one correlation (see a1_pipeline.build_rows / a3_pipeline.build_npz_rows):
+All sources are episode-averaged within each split: metrics are computed per
+episode over that episode's own aligned frames, then averaged over every
+episode whose task falls in the split (each episode counts once; frames are
+never pooled across episodes). Each source uses every episode it covers.
   - "flat" sources (topreward, gvl, robometer_zs, robodopamine_zs,
     robometer_ft, robodopamine_ft, robometer_zs_online, robometer_ft_online):
     per-frame JSON curves, aligned by frame_index.
   - "npz" sources (recap_ft, icvfe_8800, icvfe_ema_0.5): per-trajectory npz
-    predictions, aligned on their own timesteps; every context replicate's
-    frames are pooled.
+    predictions, aligned on their own timesteps; a query episode's context
+    replicates are averaged into one episode value first.
 
 Usage:
     python seen_unseen_split.py
@@ -28,6 +29,7 @@ Usage:
 from __future__ import annotations
 
 import os
+from collections import defaultdict
 
 import numpy as np
 import pandas as pd
@@ -73,47 +75,54 @@ UNSEEN_TASKS = {
 assert not (SEEN_TASKS & UNSEEN_TASKS)
 
 
-def flat_split_metrics(manual: dict, curve_set: dict, align_fn, compute_fn) -> dict:
-    """Frame-pooled {split: {pearson, kendall_tau_b, mae, n}} for one evaluator vs. manual."""
-    common = sorted(set(manual) & set(curve_set))
-    pooled = {"seen": ([], []), "unseen": ([], [])}
-    for uid in common:
-        task = manual[uid]["task"]
-        split = "seen" if task in SEEN_TASKS else "unseen" if task in UNSEEN_TASKS else None
-        if split is None:
-            continue
-        a_arr, b_arr = align_fn(curve_set[uid], manual[uid])
-        a_arr, b_arr = a_arr / 100.0, b_arr / 100.0
-        xs, ys = pooled[split]
-        xs.extend(a_arr.tolist())
-        ys.extend(b_arr.tolist())
+METRICS = ("pearson", "kendall_tau_b", "mae")
+
+
+def _split_of(task: str) -> str | None:
+    return "seen" if task in SEEN_TASKS else "unseen" if task in UNSEEN_TASKS else None
+
+
+def _average(per_episode: dict) -> dict:
+    """{split: [episode metric dicts]} -> {split: {metric: mean, n: episode count}}."""
     out = {}
-    for split, (xs, ys) in pooled.items():
-        m = compute_fn(np.array(xs), np.array(ys))
-        m["n"] = len(xs)
-        out[split] = m
+    for split in ("seen", "unseen"):
+        eps = per_episode.get(split, [])
+        out[split] = {k: float(np.mean([m[k] for m in eps])) for k in METRICS}
+        out[split]["n"] = len(eps)
     return out
 
 
+def flat_split_metrics(manual: dict, curve_set: dict, align_fn, compute_fn) -> dict:
+    """Episode-averaged {split: {pearson, kendall_tau_b, mae, n}} for one evaluator vs. manual."""
+    per_episode = defaultdict(list)
+    for uid in sorted(set(manual) & set(curve_set)):
+        split = _split_of(manual[uid]["task"])
+        if split is None:
+            continue
+        a_arr, b_arr = align_fn(curve_set[uid], manual[uid])
+        per_episode[split].append(compute_fn(a_arr / 100.0, b_arr / 100.0))
+    return _average(per_episode)
+
+
 def npz_split_metrics(manual: dict, name: str) -> dict:
-    """Frame-pooled {split: {pearson, kendall_tau_b, mae, n}} over every replicate of an npz source."""
-    pooled = {"seen": ([], []), "unseen": ([], [])}
+    """Episode-averaged {split: {pearson, kendall_tau_b, mae, n}} for an npz source.
+
+    Metrics are computed per trajectory (context replicate) and averaged over
+    a query episode's replicates before averaging over episodes.
+    """
+    by_episode = defaultdict(list)
     for t in a3.NPZ_LOADERS[name](name):
-        split = "seen" if t["task"] in SEEN_TASKS else "unseen" if t["task"] in UNSEEN_TASKS else None
+        split = _split_of(t["task"])
         if split is None:
             continue
         aligned = a3._traj_aligned_vs_manual(t["npz_path"], manual, t["episode_uid"])
         if aligned is None:
             continue
-        xs, ys = pooled[split]
-        xs.extend(aligned[0].tolist())
-        ys.extend(aligned[1].tolist())
-    out = {}
-    for split, (xs, ys) in pooled.items():
-        m = a3.compute_all_metrics(np.array(xs), np.array(ys))
-        m["n"] = len(xs)
-        out[split] = m
-    return out
+        by_episode[(split, t["episode_uid"])].append(a3.compute_all_metrics(*aligned))
+    per_episode = defaultdict(list)
+    for (split, _), reps in by_episode.items():
+        per_episode[split].append({k: float(np.mean([r[k] for r in reps])) for k in METRICS})
+    return _average(per_episode)
 
 
 def main():

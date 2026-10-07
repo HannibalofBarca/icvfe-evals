@@ -28,11 +28,12 @@ import json
 import os
 import shutil
 import zipfile
-from collections import defaultdict
 
 import numpy as np
 import pandas as pd
 from scipy.stats import pearsonr, kendalltau
+
+from aggregation import aggregate_episode_rows
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_ROOT = os.path.normpath(
@@ -144,14 +145,18 @@ def align_to_reference(entry: dict, ref_entry: dict) -> tuple[np.ndarray, np.nda
 # --------------------------------------------------------------------------
 
 def safe_pearson(x: np.ndarray, y: np.ndarray) -> float:
+    # Undefined for a constant (or single-frame) curve; scored 0 rather than NaN
+    # so these episodes count instead of being skipped (matches evaluate_ref._corr).
     if len(x) < 2 or np.std(x) == 0 or np.std(y) == 0:
-        return float("nan")
+        return 0.0
     return float(pearsonr(x, y)[0])
 
 
 def safe_kendall(x: np.ndarray, y: np.ndarray) -> float:
+    # Undefined for a constant (or single-frame) curve; scored 0 rather than NaN
+    # so these episodes count instead of being skipped (matches evaluate_ref._corr).
     if len(x) < 2 or np.std(x) == 0 or np.std(y) == 0:
-        return float("nan")
+        return 0.0
     return float(kendalltau(x, y, variant="b")[0])
 
 
@@ -178,14 +183,12 @@ def build_rows(manual: dict, roster: dict) -> list:
 
     Episodes are restricted to those common to manual and every roster
     source, so all pairs are computed over the same episode set (consistent
-    with the study-1 pipeline's rationale for doing the same).
+    with the study-1 pipeline's rationale for doing the same). Task and total
+    level are the mean of the per-episode metrics (see aggregation.py).
     """
     common = sorted(set(manual).intersection(*[set(c) for c in roster.values()]))
 
     rows = []
-    pooled_frames = defaultdict(lambda: defaultdict(lambda: ([], [])))  # task -> name -> (x, y)
-    total_frames = defaultdict(lambda: ([], []))  # name -> (x, y)
-
     for uid in common:
         task = manual[uid]["task"]
         for name, curve_set in roster.items():
@@ -208,53 +211,8 @@ def build_rows(manual: dict, roster: dict) -> list:
                     "value": value,
                     "n": n,
                 })
-            xs, ys = pooled_frames[task][name]
-            xs.extend(a.tolist())
-            ys.extend(b.tolist())
-            txs, tys = total_frames[name]
-            txs.extend(a.tolist())
-            tys.extend(b.tolist())
 
-    n_eps_by_task = defaultdict(int)
-    for uid in common:
-        n_eps_by_task[manual[uid]["task"]] += 1
-
-    for task, names in pooled_frames.items():
-        for name, (xs, ys) in names.items():
-            x = np.array(xs)
-            y = np.array(ys)
-            m = compute_all_metrics(x, y)
-            pair = f"{name}_vs_human"
-            for metric_name, value in m.items():
-                rows.append({
-                    "level": "task",
-                    "task": task,
-                    "group_id": task,
-                    "pair": pair,
-                    "metric": metric_name,
-                    "value": value,
-                    "n": len(x),
-                    "n_episodes": n_eps_by_task[task],
-                })
-
-    for name, (xs, ys) in total_frames.items():
-        x = np.array(xs)
-        y = np.array(ys)
-        m = compute_all_metrics(x, y)
-        pair = f"{name}_vs_human"
-        for metric_name, value in m.items():
-            rows.append({
-                "level": "total",
-                "task": "ALL",
-                "group_id": "ALL",
-                "pair": pair,
-                "metric": metric_name,
-                "value": value,
-                "n": len(x),
-                "n_episodes": len(common),
-            })
-
-    return rows
+    return rows + aggregate_episode_rows(rows)
 
 
 # --------------------------------------------------------------------------
@@ -296,17 +254,12 @@ def main():
     episode_wide = make_wide("episode", ["task", "group_id"]).rename(columns={"group_id": "episode_uid"})
     episode_wide.to_csv(os.path.join(OUTPUT_DIR, "episode_level_wide.csv"), index=False)
 
-    task_wide = make_wide("task", ["task"])
-    n_ep_map = long_df[long_df["level"] == "task"].groupby("task")["n_episodes"].max()
-    task_wide["n_episodes"] = task_wide["task"].map(n_ep_map)
+    task_wide = make_wide("task", ["task"]).rename(columns={"n_frames": "n_episodes"})
     task_wide.to_csv(os.path.join(OUTPUT_DIR, "task_level_wide.csv"), index=False)
 
     total_sub = long_df[long_df["level"] == "total"].copy()
     total_wide = total_sub.pivot_table(index="pair", columns="metric", values="value", aggfunc="first")
-    n_map = total_sub.groupby("pair")["n"].max()
-    ne_map = total_sub.groupby("pair")["n_episodes"].max()
-    total_wide.insert(0, "n_episodes", ne_map)
-    total_wide.insert(0, "n_frames", n_map)
+    total_wide.insert(0, "n_episodes", total_sub.groupby("pair")["n_episodes"].max())
     total_wide = total_wide.reset_index()
     total_wide.to_csv(os.path.join(OUTPUT_DIR, "total_level_wide.csv"), index=False)
 

@@ -68,27 +68,38 @@ Some archives are hosted in sibling datasets; the HF dataset card lists where to
 - **IC-VFE / RECAP:** the `target_progress` stored in their `.npz` files is
   Robo-Dopamine's curve, not the human one, so it is ignored. `prediction_progress` is
   re-scored against the human curve on the file's own `timesteps`.
-- **Aggregation:** episode-level metrics use that episode's frames. Task-, split- and
-  total-level metrics are **frame-pooled**: all aligned frames from all episodes in
-  the group, including every IC-VFE context replicate, go into one correlation.
+- **Aggregation:** every metric is computed **per episode**, over that episode's own
+  aligned frames, then averaged: task, split and total values are the mean over
+  episodes, each episode counting once. Frames are never pooled across episodes.
+  IC-VFE's context replicates (about 9 per episode) are averaged into one episode
+  value first (`analysis/aggregation.py`).
+- **Flat curves:** Pearson and Kendall are undefined when either curve is constant
+  (e.g. a failed episode the human marked 0 throughout, or a model that outputs 0
+  everywhere). Those episodes score 0 rather than being skipped, matching
+  `evaluate_ref.py`.
 
-### Pooling vs. episode averaging
+Episode averaging only checks ranking within each episode, so curves that simply
+rise with elapsed time (e.g. TOPReward) score well.
 
-The aggregation choice changes the numbers a lot. Pooling also checks whether a
-model's values mean the same thing across episodes. Episode averaging only checks
-ranking within each episode, so it rewards degenerate curves that just rise with
-elapsed time (e.g. TOPReward). Seen-task Kendall τ-b / Pearson r:
+### Results (episode-averaged)
 
-| Model | Frame-pooled (used) | Episode-averaged |
-|---|---|---|
-| Robo-Dopamine (ZS) | 0.66 / 0.83 | 0.80 / 0.88 |
-| TOPReward | 0.52 / 0.60 | 0.80 / 0.74 |
-| GVL | 0.20 / 0.25 | 0.35 / 0.43 |
-| RoboMeter FT (online) | 0.15 / 0.30 | 0.32 / 0.45 |
-| RECAP | 0.37 / 0.50 | 0.48 / 0.61 |
-| IC-VFE | 0.35 / 0.49 | 0.51 / 0.63 |
+Kendall τ-b / Pearson r vs. human, from `seen-unseen split/seen_unseen_split.csv`:
 
-Compare models only within one aggregation scheme.
+| Model | Seen τ | Seen r | Unseen τ | Unseen r |
+|---|---|---|---|---|
+| Robo-Dopamine | 0.79 | 0.88 | 0.79 | 0.90 |
+| Robo-Dopamine FT | 0.64 | 0.72 | 0.81 | 0.88 |
+| RoboMeter | 0.56 | 0.70 | 0.58 | 0.73 |
+| RoboMeter FT | 0.65 | 0.78 | 0.68 | 0.81 |
+| TOPReward | 0.80 | 0.74 | 0.81 | 0.79 |
+| GVL | 0.34 | 0.41 | 0.29 | 0.37 |
+| IC-VFE (EMA 0.5) | 0.53 | 0.64 | 0.54 | 0.67 |
+| IC-VFE (step 8800) | 0.51 | 0.62 | 0.52 | 0.65 |
+| RECAP | 0.48 | 0.60 | 0.43 | 0.57 |
+| RoboMeter online | 0.26 | 0.34 | 0.27 | 0.38 |
+| RoboMeter FT online | 0.32 | 0.44 | 0.33 | 0.46 |
+
+Fine-tuned Robo-Dopamine covers 109 of the 121 unseen episodes.
 
 ## Analyses (`analysis/`)
 

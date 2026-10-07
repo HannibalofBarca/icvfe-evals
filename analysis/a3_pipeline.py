@@ -45,10 +45,9 @@ Evaluator formats in this roster are NOT uniform:
     `prediction_progress` is instead aligned against the `manual` curve via
     the npz's own `timesteps` array. Aggregation for these three follows
     pipeline.py's `_aggregate_icvfe_pair`: episode level averages a query
-    episode's context replicates (n = replicate count, not frame count);
-    task/total pool every aligned frame of every replicate into one
-    correlation (frame-pooled), the same convention as the flat robometer
-    sources (see build_flat_rows).
+    episode's context replicates (n = replicate count, not frame count).
+    Task/total level, for every source, is the mean of the per-episode
+    metrics (aggregation.py); frames are never pooled across episodes.
 
 Usage:
     python a3_pipeline.py            # extract (if needed) + compute + write CSVs to output/
@@ -62,11 +61,12 @@ import json
 import os
 import shutil
 import zipfile
-from collections import defaultdict
 
 import numpy as np
 import pandas as pd
 from scipy.stats import pearsonr, kendalltau
+
+from aggregation import aggregate_episode_rows
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_ROOT = os.path.normpath(
@@ -175,14 +175,18 @@ def align_to_reference(entry: dict, ref_entry: dict) -> tuple[np.ndarray, np.nda
 # --------------------------------------------------------------------------
 
 def safe_pearson(x: np.ndarray, y: np.ndarray) -> float:
+    # Undefined for a constant (or single-frame) curve; scored 0 rather than NaN
+    # so these episodes count instead of being skipped (matches evaluate_ref._corr).
     if len(x) < 2 or np.std(x) == 0 or np.std(y) == 0:
-        return float("nan")
+        return 0.0
     return float(pearsonr(x, y)[0])
 
 
 def safe_kendall(x: np.ndarray, y: np.ndarray) -> float:
+    # Undefined for a constant (or single-frame) curve; scored 0 rather than NaN
+    # so these episodes count instead of being skipped (matches evaluate_ref._corr).
     if len(x) < 2 or np.std(x) == 0 or np.std(y) == 0:
-        return float("nan")
+        return 0.0
     return float(kendalltau(x, y, variant="b")[0])
 
 
@@ -206,16 +210,12 @@ def compute_all_metrics(x: np.ndarray, y: np.ndarray) -> dict:
 
 def build_flat_rows(manual: dict, flat: dict) -> list:
     """
-    Episode level is computed over that episode's own aligned frames; task and
-    total level pool every aligned frame across episodes into one
-    correlation (frame-pooled), matching build_npz_rows below.
+    Episode-level rows only, computed over each episode's own aligned frames;
+    task and total level are averaged from these in main() (aggregation.py).
     """
     common = sorted(set(manual).intersection(*[set(c) for c in flat.values()]))
 
     rows = []
-    pooled_frames = defaultdict(lambda: defaultdict(lambda: ([], [])))  # task -> name -> (x, y)
-    total_frames = defaultdict(lambda: ([], []))  # name -> (x, y)
-
     for uid in common:
         task = manual[uid]["task"]
         for name, curve_set in flat.items():
@@ -230,31 +230,6 @@ def build_flat_rows(manual: dict, flat: dict) -> list:
                     "level": "episode", "task": task, "group_id": uid,
                     "pair": pair, "metric": metric_name, "value": value, "n": n,
                 })
-            xs, ys = pooled_frames[task][name]
-            xs.extend(a.tolist()); ys.extend(b.tolist())
-            txs, tys = total_frames[name]
-            txs.extend(a.tolist()); tys.extend(b.tolist())
-
-    for task, names in pooled_frames.items():
-        for name, (xs, ys) in names.items():
-            x, y = np.array(xs), np.array(ys)
-            m = compute_all_metrics(x, y)
-            pair = f"{name}_vs_human"
-            for metric_name, value in m.items():
-                rows.append({
-                    "level": "task", "task": task, "group_id": task,
-                    "pair": pair, "metric": metric_name, "value": value, "n": len(x),
-                })
-
-    for name, (xs, ys) in total_frames.items():
-        x, y = np.array(xs), np.array(ys)
-        m = compute_all_metrics(x, y)
-        pair = f"{name}_vs_human"
-        for metric_name, value in m.items():
-            rows.append({
-                "level": "total", "task": "ALL", "group_id": "ALL",
-                "pair": pair, "metric": metric_name, "value": value, "n": len(x),
-            })
 
     return rows
 
@@ -329,28 +304,22 @@ NPZ_LOADERS = {
 
 def build_npz_rows(manual: dict, name: str) -> list:
     """
-    Episode/task/total rows for one npz-based evaluator vs. human.
-    Episode level averages a query episode's context replicates' metrics
-    (n = replicate count); task and total level pool every aligned frame of
-    every replicate into one correlation (frame-pooled), matching
-    build_flat_rows.
+    Episode-level rows for one npz-based evaluator vs. human: metrics are
+    computed per trajectory (context replicate), then averaged over a query
+    episode's replicates (n = replicate count), so each episode counts once
+    in the task/total averages computed in main().
     """
     trajectories = NPZ_LOADERS[name](name)
     pair = f"{name}_vs_human"
     metric_names = (METRIC_PEARSON, METRIC_KENDALL, METRIC_MAE)
 
     traj_rows = []
-    task_frames = defaultdict(lambda: ([], []))  # task -> (pred, manual)
-    total_x, total_y = [], []
     for t in trajectories:
         aligned = _traj_aligned_vs_manual(t["npz_path"], manual, t["episode_uid"])
         if aligned is None:
             continue
         x, y = aligned
         traj_rows.append({"task": t["task"], "episode_uid": t["episode_uid"], **compute_all_metrics(x, y)})
-        tx, ty = task_frames[t["task"]]
-        tx.extend(x.tolist()); ty.extend(y.tolist())
-        total_x.extend(x.tolist()); total_y.extend(y.tolist())
 
     tdf = pd.DataFrame(traj_rows)
     rows = []
@@ -364,21 +333,6 @@ def build_npz_rows(manual: dict, name: str) -> list:
                 "level": "episode", "task": r["task"], "group_id": r["episode_uid"],
                 "pair": pair, "metric": metric_name, "value": r[metric_name], "n": int(r["n"]),
             })
-
-    for task, (xs, ys) in task_frames.items():
-        m = compute_all_metrics(np.array(xs), np.array(ys))
-        for metric_name in metric_names:
-            rows.append({
-                "level": "task", "task": task, "group_id": task,
-                "pair": pair, "metric": metric_name, "value": m[metric_name], "n": len(xs),
-            })
-
-    m = compute_all_metrics(np.array(total_x), np.array(total_y))
-    for metric_name in metric_names:
-        rows.append({
-            "level": "total", "task": "ALL", "group_id": "ALL",
-            "pair": pair, "metric": metric_name, "value": m[metric_name], "n": len(total_x),
-        })
 
     return rows
 
@@ -405,6 +359,7 @@ def main():
         n_eps = len({r["group_id"] for r in npz_rows if r["level"] == "episode"})
         print(f"Loaded {name}: {n_eps} episodes (npz, in-context/no-context per its own design)")
         rows += npz_rows
+    rows += aggregate_episode_rows(rows)
 
     long_df = pd.DataFrame(rows)
     long_df = long_df[["level", "task", "group_id", "pair", "metric", "value", "n"]]
@@ -426,13 +381,12 @@ def main():
     episode_wide = make_wide("episode", ["task", "group_id"]).rename(columns={"group_id": "episode_uid"})
     episode_wide.to_csv(os.path.join(OUTPUT_DIR, "episode_level_wide.csv"), index=False)
 
-    task_wide = make_wide("task", ["task"])
+    task_wide = make_wide("task", ["task"]).rename(columns={"n_frames_or_reps": "n_episodes"})
     task_wide.to_csv(os.path.join(OUTPUT_DIR, "task_level_wide.csv"), index=False)
 
     total_sub = long_df[long_df["level"] == "total"].copy()
     total_wide = total_sub.pivot_table(index="pair", columns="metric", values="value", aggfunc="first")
-    n_map = total_sub.groupby("pair")["n"].max()
-    total_wide.insert(0, "n_frames_or_reps", n_map)
+    total_wide.insert(0, "n_episodes", total_sub.groupby("pair")["n"].max())
     total_wide = total_wide.reset_index()
     total_wide.to_csv(os.path.join(OUTPUT_DIR, "total_level_wide.csv"), index=False)
 
