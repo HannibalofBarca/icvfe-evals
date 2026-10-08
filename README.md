@@ -70,7 +70,8 @@ Some archives are hosted in sibling datasets; the HF dataset card lists where to
   re-scored against the human curve on the file's own `timesteps`.
 - **Aggregation:** every metric is computed **per episode**, over that episode's own
   aligned frames, then averaged: task, split and total values are the mean over
-  episodes, each episode counting once. Frames are never pooled across episodes.
+  episodes, each episode counting once. Frames are not pooled across episodes, except
+  in the frame-pooled comparison columns of the seen/unseen split.
   IC-VFE's context replicates (about 9 per episode) are averaged into one episode
   value first (`analysis/aggregation.py`).
 - **Flat curves:** Pearson and Kendall are undefined when either curve is constant
@@ -81,9 +82,11 @@ Some archives are hosted in sibling datasets; the HF dataset card lists where to
 Episode averaging only checks ranking within each episode, so curves that simply
 rise with elapsed time (e.g. TOPReward) score well.
 
-### Results (episode-averaged)
+### Results
 
-Kendall τ-b / Pearson r vs. human, from `seen-unseen split/seen_unseen_split.csv`:
+Kendall τ-b / Pearson r vs. human, from `seen-unseen split/seen_unseen_split.csv`.
+
+**Episode-averaged** (`aggregation = episode`; what the A1–A3 pipelines report):
 
 | Model | Seen τ | Seen r | Unseen τ | Unseen r |
 |---|---|---|---|---|
@@ -99,6 +102,27 @@ Kendall τ-b / Pearson r vs. human, from `seen-unseen split/seen_unseen_split.cs
 | RoboMeter online | 0.26 | 0.34 | 0.27 | 0.38 |
 | RoboMeter FT online | 0.32 | 0.44 | 0.33 | 0.46 |
 
+**Frame-pooled** (`aggregation = frame`; every aligned frame from every episode in the
+split, including each IC-VFE context replicate, in one correlation):
+
+| Model | Seen τ | Seen r | Unseen τ | Unseen r |
+|---|---|---|---|---|
+| Robo-Dopamine | 0.66 | 0.83 | 0.69 | 0.86 |
+| Robo-Dopamine FT | 0.61 | 0.73 | 0.74 | 0.87 |
+| RoboMeter | 0.46 | 0.60 | 0.53 | 0.69 |
+| RoboMeter FT | 0.52 | 0.69 | 0.59 | 0.75 |
+| TOPReward | 0.52 | 0.60 | 0.57 | 0.71 |
+| GVL | 0.20 | 0.25 | 0.24 | 0.30 |
+| IC-VFE (EMA 0.5) | 0.36 | 0.50 | 0.34 | 0.50 |
+| IC-VFE (step 8800) | 0.35 | 0.49 | 0.34 | 0.48 |
+| RECAP | 0.37 | 0.50 | 0.25 | 0.37 |
+| RoboMeter online | 0.13 | 0.23 | 0.23 | 0.35 |
+| RoboMeter FT online | 0.15 | 0.30 | 0.23 | 0.37 |
+
+Pooling also checks whether a model's values mean the same thing across episodes;
+episode averaging only checks ranking within each episode. Compare models only within
+one aggregation scheme.
+
 Fine-tuned Robo-Dopamine covers 109 of the 121 unseen episodes.
 
 ## Analyses (`analysis/`)
@@ -108,7 +132,7 @@ Fine-tuned Robo-Dopamine covers 109 of the 121 unseen episodes.
 | `a1_pipeline.py` | **A1:** zero-shot roster (TOPReward, GVL, RoboMeter, Robo-Dopamine) vs. human | `A1-reward model ablation/` |
 | `a2_pipeline.py` | **A2:** fine-tuned vs. zero-shot (RoboMeter, Robo-Dopamine) | `A2-finetuned vs zeroshot/` |
 | `a3_pipeline.py` | **A3:** online models (RoboMeter ZS/FT online, RECAP, IC-VFE) vs. human | `A3-online ft models vs human/` |
-| `seen_unseen_split.py` | A1–A3 metrics split into seen (15) / unseen (12) tasks, using RECAP's fine-tuning split | `seen-unseen split/` |
+| `seen_unseen_split.py` | A1–A3 metrics split into seen (15) / unseen (12) tasks, using RECAP's fine-tuning split, both episode-averaged and frame-pooled | `seen-unseen split/` |
 | `b1_full_run.py` | **B1:** for each frame of an episode, retrieve the matching point in a reference demo of the same task, using value estimates, DINO visual similarity, or both, and measure how well the retrieved point matches | `b1_full_run/` |
 
 B1 retrieval metrics (`b_metrics.py`):

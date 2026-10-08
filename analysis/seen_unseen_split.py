@@ -12,16 +12,20 @@ applied uniformly to every OTHER method's rows too (not just RECAP's own),
 on the assumption that "seen"/"unseen" is a property of the task/icl_dataset
 split itself, not of which model happens to report it.
 
-All sources are episode-averaged within each split: metrics are computed per
-episode over that episode's own aligned frames, then averaged over every
-episode whose task falls in the split (each episode counts once; frames are
-never pooled across episodes). Each source uses every episode it covers.
+Each source is reported under two aggregations (the `aggregation` column),
+over every episode it covers whose task falls in the split:
+  - "episode": metrics are computed per episode over that episode's own
+    aligned frames, then averaged over episodes (each episode counts once).
+    This is what the A1-A3 pipelines report.
+  - "frame": every aligned (prediction, human) frame from every episode in the
+    split is pooled into one correlation. Reported for comparison only.
   - "flat" sources (topreward, gvl, robometer_zs, robodopamine_zs,
     robometer_ft, robodopamine_ft, robometer_zs_online, robometer_ft_online):
     per-frame JSON curves, aligned by frame_index.
   - "npz" sources (recap_ft, icvfe_8800, icvfe_ema_0.5): per-trajectory npz
-    predictions, aligned on their own timesteps; a query episode's context
-    replicates are averaged into one episode value first.
+    predictions, aligned on their own timesteps. Episode aggregation averages
+    a query episode's context replicates into one episode value first; frame
+    aggregation pools every replicate's frames.
 
 Usage:
     python seen_unseen_split.py
@@ -82,33 +86,41 @@ def _split_of(task: str) -> str | None:
     return "seen" if task in SEEN_TASKS else "unseen" if task in UNSEEN_TASKS else None
 
 
-def _average(per_episode: dict) -> dict:
-    """{split: [episode metric dicts]} -> {split: {metric: mean, n: episode count}}."""
-    out = {}
+def _split_metrics(per_episode: dict, compute_fn) -> dict:
+    """{split: [(episode replicate metric dicts, pooled pred, pooled human)]} ->
+    {aggregation: {split: {metric: value, n: episode or frame count}}}."""
+    out = {"episode": {}, "frame": {}}
     for split in ("seen", "unseen"):
         eps = per_episode.get(split, [])
-        out[split] = {k: float(np.mean([m[k] for m in eps])) for k in METRICS}
-        out[split]["n"] = len(eps)
+        ep_vals = [{k: float(np.mean([r[k] for r in reps])) for k in METRICS} for reps, _, _ in eps]
+        out["episode"][split] = {k: float(np.mean([m[k] for m in ep_vals])) for k in METRICS}
+        out["episode"][split]["n"] = len(eps)
+        xs = np.concatenate([x for _, x, _ in eps])
+        ys = np.concatenate([y for _, _, y in eps])
+        out["frame"][split] = compute_fn(xs, ys)
+        out["frame"][split]["n"] = len(xs)
     return out
 
 
 def flat_split_metrics(manual: dict, curve_set: dict, align_fn, compute_fn) -> dict:
-    """Episode-averaged {split: {pearson, kendall_tau_b, mae, n}} for one evaluator vs. manual."""
+    """Episode-averaged and frame-pooled metrics for one evaluator vs. manual."""
     per_episode = defaultdict(list)
     for uid in sorted(set(manual) & set(curve_set)):
         split = _split_of(manual[uid]["task"])
         if split is None:
             continue
         a_arr, b_arr = align_fn(curve_set[uid], manual[uid])
-        per_episode[split].append(compute_fn(a_arr / 100.0, b_arr / 100.0))
-    return _average(per_episode)
+        a_arr, b_arr = a_arr / 100.0, b_arr / 100.0
+        per_episode[split].append(([compute_fn(a_arr, b_arr)], a_arr, b_arr))
+    return _split_metrics(per_episode, compute_fn)
 
 
 def npz_split_metrics(manual: dict, name: str) -> dict:
-    """Episode-averaged {split: {pearson, kendall_tau_b, mae, n}} for an npz source.
+    """Episode-averaged and frame-pooled metrics for an npz source.
 
-    Metrics are computed per trajectory (context replicate) and averaged over
-    a query episode's replicates before averaging over episodes.
+    Episode aggregation computes metrics per trajectory (context replicate) and
+    averages a query episode's replicates first; frame aggregation pools every
+    replicate's frames.
     """
     by_episode = defaultdict(list)
     for t in a3.NPZ_LOADERS[name](name):
@@ -118,11 +130,20 @@ def npz_split_metrics(manual: dict, name: str) -> dict:
         aligned = a3._traj_aligned_vs_manual(t["npz_path"], manual, t["episode_uid"])
         if aligned is None:
             continue
-        by_episode[(split, t["episode_uid"])].append(a3.compute_all_metrics(*aligned))
+        by_episode[(split, t["episode_uid"])].append(aligned)
     per_episode = defaultdict(list)
     for (split, _), reps in by_episode.items():
-        per_episode[split].append({k: float(np.mean([r[k] for r in reps])) for k in METRICS})
-    return _average(per_episode)
+        per_episode[split].append((
+            [a3.compute_all_metrics(*r) for r in reps],
+            np.concatenate([r[0] for r in reps]),
+            np.concatenate([r[1] for r in reps]),
+        ))
+    return _split_metrics(per_episode, a3.compute_all_metrics)
+
+
+def _rows(section: str, method: str, metrics: dict) -> list[dict]:
+    return [{"section": section, "method": method, "aggregation": agg, "split": s, **m}
+            for agg, splits in metrics.items() for s, m in splits.items()]
 
 
 def main():
@@ -135,8 +156,7 @@ def main():
     for name in a1.ROSTER:
         curve_set = a1.load_curve_set(name)
         split = flat_split_metrics(manual_a1, curve_set, a1.align_to_reference, a1.compute_all_metrics)
-        for s, m in split.items():
-            rows.append({"section": "A1", "method": name, "split": s, **m})
+        rows += _rows("A1", name, split)
 
     # -- A2 flat sources (robometer_ft, robodopamine_ft; zs already covered by A1) --
     a2.extract_archives()
@@ -144,8 +164,7 @@ def main():
     for name in ("robometer_ft", "robodopamine_ft"):
         curve_set = a2.load_curve_set(name)
         split = flat_split_metrics(manual_a2, curve_set, a2.align_to_reference, a2.compute_all_metrics)
-        for s, m in split.items():
-            rows.append({"section": "A2", "method": name, "split": s, **m})
+        rows += _rows("A2", name, split)
 
     # -- A3 flat sources (robometer_zs_online, robometer_ft_online) --
     a3.extract_archives()
@@ -153,16 +172,14 @@ def main():
     for name in a3.FLAT_ROSTER:
         curve_set = a3.load_curve_set(name)
         split = flat_split_metrics(manual_a3, curve_set, a3.align_to_reference, a3.compute_all_metrics)
-        for s, m in split.items():
-            rows.append({"section": "A3", "method": name, "split": s, **m})
+        rows += _rows("A3", name, split)
 
     # -- A3 npz sources (recap_ft, icvfe_8800, icvfe_ema_0.5) --
     for name in a3.NPZ_ROSTER:
         split = npz_split_metrics(manual_a3, name)
-        for s, m in split.items():
-            rows.append({"section": "A3", "method": name, "split": s, **m})
+        rows += _rows("A3", name, split)
 
-    df = pd.DataFrame(rows)[["section", "method", "split", "n", "pearson", "kendall_tau_b", "mae"]]
+    df = pd.DataFrame(rows)[["section", "method", "aggregation", "split", "n", "pearson", "kendall_tau_b", "mae"]]
     out_path = os.path.join(OUTPUT_DIR, "seen_unseen_split.csv")
     df.to_csv(out_path, index=False)
     print(df.to_string(index=False))
